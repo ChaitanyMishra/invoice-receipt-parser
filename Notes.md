@@ -68,3 +68,29 @@ In `database.py`, I set `echo=True` on the engine. This makes SQLAlchemy print o
 - ✅ `invoice` table exists in PostgreSQL with correct columns (verified via `\d invoice`)
 - ✅ Row inserted, confirmed directly in psql (`SELECT * FROM invoice;`)
 - ✅ Row queried back successfully from Python script
+
+
+
+Day 02 -
+
+
+Day 03 - TOday i write code for CRUD operations in DB how user invoice Create in DB and Delete in DB and Update in DB and Retrive from DB in which i use to write Functions-
+
+get_invoice(invoice_id:int): - here seimply open a session get session from engine and use sql model command sesson.get(Invoice , invoice_id) it take invoice id from user search in DB and fetch the data 
+
+create_invoice- it take inoout from use like vendor name , date , amount and useing sql model command session.add and adddetails then commit and refresh it
+
+update_invoice - here what i learn is here we take input from use also like name , amount,date but we set default value as  None becase if we not set default value and user only give updated value eg - only amount so other feild automettly get deleted so to prevent that we set defaut value as None and when we update we check like if this is not none then value = updated value we dont need any kind of .uodate in sql model just like other .add, .delete because sqlmodel alredy under the hood identify when we retrive data sql model set in session and trak all changes we dont add new thing we just update so it marked updated data as dirty and execute sql.update command and update old data not creating new 
+
+delete_invoice -  here we take delted id as inout and run session.delete command but if your data table is reffer to other table or have relationship like 1  to many or many to one  postgres  prevent to delete data directly so we have 2 option 1st - automettly cascading where we write code in database layer that if we execute any delete qurry it also delte in other tables but it is resky and delete your data permanetly but if u want full controle we can write manully in delte querry 1st we 1st run the querry for another table where our data is store here Line item table we run querry like - Select(LineItem).where(Line_item.invoice_id==invoice_id) to get all releted data then execute comand using session.exec(statment).all nown we have data now run the loop and delete item in lineItem then we use Flush() to stage out changes then we delte our main table data like session.delete(invoice)
+
+The Error i counter with is - 
+ psycopg2.errors.ForeignKeyViolation - because we try to delte invoce 1st withoud delting related data in lineitem 
+
+ psycopg2.errors.ForeignKeyViolation- even though my code was correct i see this because internaly SQLAlchemy/SQLModel delays and reorders SQL statements inside a session to optimize performance. so we use Flush() to fix the error 
+
+commit() - does TWO things: sends all staged changes to the DB (flush) AND finalizes/closes the transaction, making changes permanent
+
+flush() - does ONE thing: sends staged changes to the DB, but the transaction stays OPEN — nothing is finalized yet, could still be rolled back
+
+flush() - it do only one thing is stage the changes in a queue 
