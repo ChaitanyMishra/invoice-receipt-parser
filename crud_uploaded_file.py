@@ -2,7 +2,6 @@ from sqlmodel import Session,select
 from app.database import engine
 import os
 from app.models import UploadedFile
-import pdfplumber
 
 def create_uploaded_file(filename:str,size:int,filepath:str):
     with Session(engine) as session:
@@ -42,7 +41,15 @@ def delete_file(id:int):
             
     return {"status":"deleted successfully"}
 
+def update_extracted_text(file_id:int,text:str |None):
+    if not text:
+        return None
+    with Session(engine) as session:
+        file = session.get(UploadedFile,file_id)
+        if not file:
+            return None
+        file.extracted_text = text
+        session.commit()
+        session.refresh(file)
+    return file
 
-
-def extract_text_from_pdf(filepath:str) -> None:
-    

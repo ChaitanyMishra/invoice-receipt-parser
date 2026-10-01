@@ -2,8 +2,8 @@
 from fastapi import FastAPI,UploadFile,File , HTTPException
 # import os to handle os level task like make filder and join file paths
 import os
-
-from crud_uploaded_file import create_uploaded_file , files, get_file_by_id,delete_file
+from app.services.pdf_extractor import extract_text_from_pdf
+from crud_uploaded_file import create_uploaded_file , files, get_file_by_id,delete_file,update_extracted_text
 
 # just a variable
 UPLOAD_DIR="uploads"
@@ -59,3 +59,25 @@ def del_file(file_id:int):
     if not res:
         raise HTTPException(status_code=404,detail='file not found')
     return res
+
+@app.post('/files/{file_id}/extract')
+def extract_file(file_id:int):
+    file = get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404,detail='file not found')
+    file_path = file.filepath
+    extracted_text = extract_text_from_pdf(file_path)
+        
+    if not extracted_text:
+        return {
+            "status": "no_text_extracted",
+            "file_id": file_id,
+            "note": "File has no extractable text. Likely scanned PDF or image. OCR fallback coming soon."
+        }
+    update_extracted_text(file_id , extracted_text)
+    return {
+        "status":"extracted",
+        "file_id":file_id,
+        "length":len(extracted_text),
+        "preview":extracted_text[:200]
+    }

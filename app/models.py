@@ -44,3 +44,4 @@ class UploadedFile(SQLModel, table=True):
     size:int
     filepath:str
     uploaded_at:datetime.datetime=Field(default_factory=datetime.datetime.now)
+    extracted_text:Optional[str]=Field(default=None)
