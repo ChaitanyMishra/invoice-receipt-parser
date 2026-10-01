@@ -1,3 +1,19 @@
-.env
+# Uploaded files (user data)
+uploads/
+
+# Virtual environment
 venv/
+
+# Environment variables
+.env
+
+# Python cache
 __pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

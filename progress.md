@@ -16,7 +16,17 @@ Learn:
     2- Use of Flush() - session.fush()
     3- diffrence between commit() and flush()
     
+Day 4 - Sep 06
+Buit: multi-condition filtering, defensive existence checks, __name__ guard
+Files: test_model.py
+Learn: 
+1-   How to add Mutliple filtering using and_() 
+2-   Why we need and_() when sqlModel allow mutliple conditito seprated by , 
+3-   importence of __main__ == __main__
 
+
+Day 5 - Sep  11
+Built: 
 
 
 

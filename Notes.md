@@ -85,7 +85,7 @@ update_invoice - here what i learn is here we take input from use also like name
 delete_invoice -  here we take delted id as inout and run session.delete command but if your data table is reffer to other table or have relationship like 1  to many or many to one  postgres  prevent to delete data directly so we have 2 option 1st - automettly cascading where we write code in database layer that if we execute any delete qurry it also delte in other tables but it is resky and delete your data permanetly but if u want full controle we can write manully in delte querry 1st we 1st run the querry for another table where our data is store here Line item table we run querry like - Select(LineItem).where(Line_item.invoice_id==invoice_id) to get all releted data then execute comand using session.exec(statment).all nown we have data now run the loop and delete item in lineItem then we use Flush() to stage out changes then we delte our main table data like session.delete(invoice)
 
 The Error i counter with is - 
- psycopg2.errors.ForeignKeyViolation - because we try to delte invoce 1st withoud delting related data in lineitem 
+ psycopg2.errors.ForeignKeyViolation - because we try to delte invoce 1st without delting related data in lineitem 
 
  psycopg2.errors.ForeignKeyViolation- even though my code was correct i see this because internaly SQLAlchemy/SQLModel delays and reorders SQL statements inside a session to optimize performance. so we use Flush() to fix the error 
 
