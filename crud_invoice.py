@@ -4,17 +4,38 @@ from typing import Optional
 from app.models import LineItem , Invoice
 import datetime
 
-def create_invoice(vendor_name:str,amount:float,date:datetime.date,status:str,items:list[dict]):
+def create_invoice(parsed_data:dict, uploaded_file_id:int):
     with Session(engine) as session:
-        invoice=Invoice(vendor_name=vendor_name,amount=amount,status=status,date=date)
+        date=parsed_data.get('date')
+        parsed_date= datetime.datetime.strptime(date,"%d.%m.%Y").date()
+        total_amount = float(parsed_data.get('total'))
+        total_tax = float(parsed_data.get('tax_amount'))
+        sub_total = float(total_amount-total_tax)
+        invoice = Invoice(
+                total=float(parsed_data.get('total')) if parsed_data.get('total') else None,
+                tax_amount=parsed_data.get('tax_amount') if parsed_data.get('tax_amount') else None,
+                order_number=parsed_data.get('order_number'),
+                invoice_number = parsed_data.get('invoice_number'),
+                date= parsed_date,
+                address=parsed_data.get('address') if parsed_data.get('address') else None,
+                gstin=parsed_data.get('gstin'),
+                uploaded_file_id=uploaded_file_id,
+                vendor_name= parsed_data.get('vendor_name') if parsed_data.get('vendor_name') else None,
+                status='completed',
+                subtotal=sub_total           
+                )
+            
+        
+
+
         session.add(invoice)
         session.commit()
         session.refresh(invoice)
 
-        for item in items:
-            line_item=LineItem(invoice_id=invoice.id,item_name=item["item_name"],amount=item["amount"])
-            session.add(line_item)
-        session.commit()
+        # for item in items:
+        #     line_item=LineItem(invoice_id=invoice.id,item_name=item["item_name"],amount=item["amount"])
+        #     session.add(line_item)
+        # session.commit()
         return invoice
 
 def get_invoice(invoice_id:int) -> Optional[Invoice]:
@@ -53,8 +74,13 @@ def delete_invoice(invoice_id:int):
         return f"Deleted Sucessfully!"
 
 if __name__ == "__main__":
-    print(delete_invoice(1))
-    create_invoice("Test Multi Vendor", 1500, datetime.date(2026, 2, 1), "pending",
-    [{"item_name": "A", "amount": 500},
-     {"item_name": "B", "amount": 600},
-     {"item_name": "C", "amount": 400}])
+    test_parsed = {
+        "invoice_number": "TEST-001",
+        "date": "28.12.2025",
+        "gstin": "29AAICA3918J1ZE",
+        "order_number": "406-0000000-0000000",
+        "total": "100.50",
+    }
+    result = create_invoice(test_parsed, uploaded_file_id=1)
+    print(f"id={result.id}, number={result.invoice_number}, total={result.total}, date={result.date}, gstin={result.gstin}")
+    

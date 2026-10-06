@@ -4,7 +4,8 @@ from fastapi import FastAPI,UploadFile,File , HTTPException
 import os
 from app.services.pdf_extractor import extract_text_from_pdf
 from crud_uploaded_file import create_uploaded_file , files, get_file_by_id,delete_file,update_extracted_text
-
+from app.services.invoice_parser import parse_invoice_text
+from crud_invoice import create_invoice
 # just a variable
 UPLOAD_DIR="uploads"
 # os make new folder with name of uploads , exsist_ok = if not created create onece and if already exsist do nothing
@@ -81,3 +82,17 @@ def extract_file(file_id:int):
         "length":len(extracted_text),
         "preview":extracted_text[:200]
     }
+@app.post("/files/{file_id}/parse")
+def parse_file(file_id: int):
+    file = get_file_by_id(file_id)
+    parsed_text = file.extracted_text
+    parsed_dict = parse_invoice_text(parsed_text)
+    if not parsed_dict:
+        raise HTTPException(status_code=404,detail=f'data is missing {parsed_dict}')
+    invoice = create_invoice(parsed_dict,file_id)
+    return{
+        "status": "parsed",
+        "invoice_id": invoice.id,
+        "parsed_data": parsed_dict,
+    }
+    
