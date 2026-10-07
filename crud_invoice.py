@@ -40,7 +40,8 @@ def create_invoice(parsed_data:dict, uploaded_file_id:int):
                 uploaded_file_id=uploaded_file_id,
                 vendor_name= parsed_data.get('vendor_name') if parsed_data.get('vendor_name') else None,
                 status='completed',
-                subtotal=sub_total           
+                subtotal=sub_total 
+                          
                 )
         session.add(invoice)
         session.commit()

@@ -14,7 +14,7 @@ def extract_text_from_pdf(filepath:str) ->str| None:
                 all_text.append(text)
 
     if not all_text:
-        return None
+        return {}
     return '\n'.join(all_text)
 
             
