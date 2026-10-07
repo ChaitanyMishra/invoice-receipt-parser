@@ -5,12 +5,30 @@ from app.models import LineItem , Invoice
 import datetime
 
 def create_invoice(parsed_data:dict, uploaded_file_id:int):
+    date_str=parsed_data.get('date')
+    parsed_date= datetime.datetime.strptime(date_str,"%d.%m.%Y").date() if date_str else None
+    total_str = parsed_data.get('total')
+    total_amount = float(total_str) if total_str else None
+    tax_str = parsed_data.get('tax_amount')
+    total_tax = float(tax_str) if tax_str else None
+    sub_total = (total_amount-total_tax) if (total_amount is not None and total_tax is not None) else None
     with Session(engine) as session:
-        date=parsed_data.get('date')
-        parsed_date= datetime.datetime.strptime(date,"%d.%m.%Y").date()
-        total_amount = float(parsed_data.get('total'))
-        total_tax = float(parsed_data.get('tax_amount'))
-        sub_total = float(total_amount-total_tax)
+        existing=session.exec(select(Invoice).where(Invoice.uploaded_file_id== uploaded_file_id)).first()
+
+        if existing:
+            if total_amount is not None: existing.total = total_amount
+            if total_tax is not None: existing.tax_amount = total_tax
+            if parsed_date is not None: existing.date = parsed_date
+            if parsed_data.get('invoice_number'): existing.invoice_number = parsed_data['invoice_number']
+            if parsed_data.get('gstin'): existing.gstin = parsed_data['gstin']
+            if parsed_data.get('order_number'): existing.order_number = parsed_data['order_number']
+            if parsed_data.get('vendor_name'): existing.vendor_name = parsed_data['vendor_name']
+            if sub_total is not None: existing.subtotal = sub_total
+            
+            
+            session.commit()
+            session.refresh(existing)
+            return existing
         invoice = Invoice(
                 total=float(parsed_data.get('total')) if parsed_data.get('total') else None,
                 tax_amount=parsed_data.get('tax_amount') if parsed_data.get('tax_amount') else None,
@@ -24,13 +42,9 @@ def create_invoice(parsed_data:dict, uploaded_file_id:int):
                 status='completed',
                 subtotal=sub_total           
                 )
-            
-        
-
-
         session.add(invoice)
         session.commit()
-        session.refresh(invoice)
+        session.refresh(invoice)            
 
         # for item in items:
         #     line_item=LineItem(invoice_id=invoice.id,item_name=item["item_name"],amount=item["amount"])
