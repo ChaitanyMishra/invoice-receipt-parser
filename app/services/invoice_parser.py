@@ -49,6 +49,7 @@ def parse_invoice_text(text: str) -> dict:
     else:
         parsed_text['vendor_name'] = None  
     parsed_text['address'] = None
+     
 
     missing_field = [key for key,value in parsed_text.items() if value is None]
     llm_result=[]
