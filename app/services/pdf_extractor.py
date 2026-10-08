@@ -1,20 +1,19 @@
 import pdfplumber
 from pathlib import Path
-def extract_text_from_pdf(filepath:str) ->str| None:
+
+
+def extract_text_from_pdf(filepath: str) -> str | None:
     file = Path(filepath)
     file_type = file.suffix
-    if file_type.lower() != '.pdf':
+    if file_type.lower() != ".pdf":
         return None
     all_text = []
     with pdfplumber.open(filepath) as pdf:
-        
-        for i,page in enumerate(pdf.pages,start=1):
+        for i, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
             if text:
                 all_text.append(text)
 
     if not all_text:
         return {}
-    return '\n'.join(all_text)
-
-            
+    return "\n".join(all_text)
