@@ -3,6 +3,7 @@ from app.database import engine
 from typing import Optional
 from app.models import LineItem , Invoice
 import datetime
+# from app.services.llm_extractor import extract_missing_data_groq,extract_missing_data
 
 def create_invoice(parsed_data:dict, uploaded_file_id:int):
     date_str=parsed_data.get('date')
@@ -12,8 +13,10 @@ def create_invoice(parsed_data:dict, uploaded_file_id:int):
     tax_str = parsed_data.get('tax_amount')
     total_tax = float(tax_str) if tax_str else None
     sub_total = (total_amount-total_tax) if (total_amount is not None and total_tax is not None) else None
+    address = parsed_data.get('address')
     with Session(engine) as session:
         existing=session.exec(select(Invoice).where(Invoice.uploaded_file_id== uploaded_file_id)).first()
+        
 
         if existing:
             if total_amount is not None: existing.total = total_amount
@@ -24,6 +27,7 @@ def create_invoice(parsed_data:dict, uploaded_file_id:int):
             if parsed_data.get('order_number'): existing.order_number = parsed_data['order_number']
             if parsed_data.get('vendor_name'): existing.vendor_name = parsed_data['vendor_name']
             if sub_total is not None: existing.subtotal = sub_total
+            if parsed_data.get('address'): existing.address = parsed_data['address']
             
             
             session.commit()
@@ -41,6 +45,7 @@ def create_invoice(parsed_data:dict, uploaded_file_id:int):
                 vendor_name= parsed_data.get('vendor_name') if parsed_data.get('vendor_name') else None,
                 status='completed',
                 subtotal=sub_total 
+                
                           
                 )
         session.add(invoice)
