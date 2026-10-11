@@ -1,5 +1,6 @@
-import pdfplumber
 from pathlib import Path
+
+import pdfplumber
 
 
 def extract_text_from_pdf(filepath: str) -> str | None:

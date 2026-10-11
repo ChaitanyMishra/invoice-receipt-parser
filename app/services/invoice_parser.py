@@ -1,5 +1,7 @@
 import re
-from app.services.llm_extractor import extract_missing_data,extract_missing_data_groq
+
+from app.services.llm_extractor import extract_missing_data, extract_missing_data_groq
+
 
 def parse_invoice_text(text: str) -> dict:
     if not text:
@@ -11,38 +13,38 @@ def parse_invoice_text(text: str) -> dict:
     order_number = re.search(r"Order Number\s*:\s*(\d{3}-\d{7}-\d{7})", text)
     total = re.search(r"TOTAL\s*:\s*₹\s*[\S.,]+\s*₹\s*([\S.,]+)", text)
     tax_amount = re.search(r"TOTAL\s*:\s*₹\s*([\S.,]+)\s*₹", text)
-    vendor_name= re.search(r"(?m)^For\s+(.+?)\s*:\s*$", text)
+    vendor_name = re.search(r"(?m)^For\s+(.+?)\s*:\s*$", text)
     if invoice_number:
-        parsed_text['invoice_number'] = invoice_number.group(1)
+        parsed_text["invoice_number"] = invoice_number.group(1)
     else:
-        parsed_text['invoice_number'] = None
+        parsed_text["invoice_number"] = None
     if invoice_date:
-        parsed_text['date'] = invoice_date.group(1)
+        parsed_text["date"] = invoice_date.group(1)
     else:
-        parsed_text['date'] = None
+        parsed_text["date"] = None
     if gst_in:
-        parsed_text['gstin'] = gst_in.group(1)
+        parsed_text["gstin"] = gst_in.group(1)
     else:
-        parsed_text['gstin'] = None
+        parsed_text["gstin"] = None
     if order_number:
-        parsed_text['order_number'] = order_number.group(1)
+        parsed_text["order_number"] = order_number.group(1)
     else:
-        parsed_text['order_number'] = None
+        parsed_text["order_number"] = None
     if total:
-        parsed_text['total'] = total.group(1)
+        parsed_text["total"] = total.group(1)
     else:
-        parsed_text['total'] = None
+        parsed_text["total"] = None
     if tax_amount:
-        parsed_text['tax_amount']= tax_amount.group(1)
+        parsed_text["tax_amount"] = tax_amount.group(1)
     else:
-        parsed_text['tax_amount'] = None
+        parsed_text["tax_amount"] = None
     if vendor_name:
-        parsed_text['vendor_name']=vendor_name.group(1)
+        parsed_text["vendor_name"] = vendor_name.group(1)
     else:
-        parsed_text['vendor_name'] = None
-    parsed_text['address'] = None
-    missing_field = [key for key,value in parsed_text.items() if value is None]
-    llm_result=[]
+        parsed_text["vendor_name"] = None
+    parsed_text["address"] = None
+    missing_field = [key for key, value in parsed_text.items() if value is None]
+    llm_result = []
     if missing_field:
         try:
             llm_result = extract_missing_data(text, missing_field)
@@ -62,9 +64,4 @@ def parse_invoice_text(text: str) -> dict:
         if value:
             parsed_text[field] = llm_result[field]
 
-
     return parsed_text
-
-
-
-

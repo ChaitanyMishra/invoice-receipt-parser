@@ -1,12 +1,12 @@
-from google import genai
+import json
 import os
+
 from dotenv import load_dotenv
+from google import genai
 from google.genai import types
 from openai import OpenAI
-import json
 
 load_dotenv()
-
 
 
 def extract_missing_data(text: str, missing_data: list) -> dict:
@@ -76,4 +76,8 @@ Invoice text:
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
     )
-    return json.loads(response.choices[0].message.content) if response.choices[0].message.content else {}
+    return (
+        json.loads(response.choices[0].message.content)
+        if response.choices[0].message.content
+        else {}
+    )
