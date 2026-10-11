@@ -17,3 +17,20 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Personal notes
+Notes.md
+progress.md
+
+# Learning scratchpad
+test_skills/
+
+# Postman
+postman/
+
+# Scratch test scripts
+test_connection.py
+test_data.py
+test_model.py
+test_pdfplumbert.py
+test_gemin_key.py
