@@ -106,9 +106,11 @@ def parse_file(file_id: int):
     parsed_dict = parse_invoice_text(parsed_text)
     if not parsed_dict:
         raise HTTPException(status_code=404, detail=f"data is missing {parsed_dict}")
-    invoice = create_invoice(parsed_dict, file_id)
+    # invoice = create_invoice(parsed_dict, file_id)
+    invoice_id = create_invoice(parsed_dict, file_id)
     return {
-        "status": "parsed",
-        "invoice_id": invoice.id,
-        "parsed_data": parsed_dict,
-    }
+    "status": "parsed",
+    "invoice_id": invoice_id,
+    "parsed_data": parsed_dict
+}
+

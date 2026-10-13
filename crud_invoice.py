@@ -1,6 +1,6 @@
 import datetime
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, delete
 
 from app.database import engine
 from app.models import Invoice, LineItem
@@ -22,11 +22,10 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
         if (total_amount is not None and total_tax is not None)
         else None
     )
-    address = parsed_data.get("address")
+    line_items = parsed_data.get("line_items", [])
+    # address = parsed_data.get("address")
     with Session(engine) as session:
-        existing = session.exec(
-            select(Invoice).where(Invoice.uploaded_file_id == uploaded_file_id)
-        ).first()
+        existing = session.exec(select(Invoice).where(Invoice.uploaded_file_id == uploaded_file_id)).first()
 
         if existing:
             if total_amount is not None:
@@ -47,10 +46,24 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
                 existing.subtotal = sub_total
             if parsed_data.get("address"):
                 existing.address = parsed_data["address"]
+            session.exec(delete(LineItem).where(LineItem.invoice_id == existing.id))
+            for item in line_items:
+                line_item = LineItem(
+                    invoice_id=existing.id,
+                    description=item["description"],
+                    amount=item["amount"],
+                    unit_price=float(item["unit_price"])
+                    if item.get("unit_price") is not None
+                    else None,
 
+                    quantity=float(item["quantity"])
+                    if item.get("quantity") is not None
+                    else None,
+                )
+                session.add(line_item)
             session.commit()
             session.refresh(existing)
-            return existing
+            return existing.id
         invoice = Invoice(
             total=float(parsed_data.get("total")) if parsed_data.get("total") else None,
             tax_amount=(
@@ -74,11 +87,17 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
         session.commit()
         session.refresh(invoice)
 
-        # for item in items:
-        #     line_item=LineItem(invoice_id=invoice.id,item_name=item["item_name"],amount=item["amount"])
-        #     session.add(line_item)
-        # session.commit()
-        return invoice
+        for item in line_items:
+            items = LineItem(
+                invoice_id=invoice.id,
+                description=item["description"],
+                amount=item["amount"],
+                unit_price=float(item["unit_price"]) if item.get("unit_price") is not None else None,
+                quantity=float(item["quantity"]) if item.get("quantity") is not None else None,
+            )
+            session.add(items)
+        session.commit()
+        return invoice.id
 
 
 def get_invoice(invoice_id: int) -> Invoice | None:
@@ -96,7 +115,7 @@ def update_invoice(
         if vendor_name is not None:
             invoice.vendor_name = vendor_name
         if amount is not None:
-            invoice.amount = amount
+            invoice.total = amount
         if date is not None:
             invoice.date = date
         session.commit()
@@ -119,22 +138,4 @@ def delete_invoice(invoice_id: int):
         session.delete(invoice)
         session.commit()
         return "Deleted Sucessfully!"
-
-def create_line_items(invoice_id:int,parsed_items:dict):
-    with Session(engine) as session:
-        invoice = session.get(Invoice,invoice_id)
-        pass
-
-if __name__ == "__main__":
-    test_parsed = {
-        "invoice_number": "TEST-001",
-        "date": "28.12.2025",
-        "gstin": "29AAICA3918J1ZE",
-        "order_number": "406-0000000-0000000",
-        "total": "100.50",
-    }
-    result = create_invoice(test_parsed, uploaded_file_id=1)
-    print(
-        f"id={result.id}, number={result.invoice_number}, total={result.total}, date={result.date}, gstin={result.gstin}"
-    )
 
