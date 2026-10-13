@@ -32,9 +32,8 @@ class LineItem(SQLModel, table=True):
     invoice_id: int = Field(foreign_key="invoice.id")
 
     # item info
-    item_name: str
     amount: float
-    description: str | None = Field(None)
+    description: str 
     unit_price: float | None = Field(default=None)
     quantity: float | None = Field(default=None)
 

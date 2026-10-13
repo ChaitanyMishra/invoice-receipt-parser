@@ -120,6 +120,10 @@ def delete_invoice(invoice_id: int):
         session.commit()
         return "Deleted Sucessfully!"
 
+def create_line_items(invoice_id:int,parsed_items:dict):
+    with Session(engine) as session:
+        invoice = session.get(Invoice,invoice_id)
+        pass
 
 if __name__ == "__main__":
     test_parsed = {
@@ -133,3 +137,4 @@ if __name__ == "__main__":
     print(
         f"id={result.id}, number={result.invoice_number}, total={result.total}, date={result.date}, gstin={result.gstin}"
     )
+

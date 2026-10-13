@@ -1,6 +1,7 @@
 import re
 
-from app.services.llm_extractor import extract_missing_data, extract_missing_data_groq
+from app.services.llm_extractor import extract_missing_data_gemini, extract_missing_data_groq
+from app.services.llm_extractor import extract_line_items_gemini , extract_line_items_groq
 
 
 def parse_invoice_text(text: str) -> dict:
@@ -44,24 +45,37 @@ def parse_invoice_text(text: str) -> dict:
         parsed_text["vendor_name"] = None
     parsed_text["address"] = None
     missing_field = [key for key, value in parsed_text.items() if value is None]
-    llm_result = []
+    llm_result = {}
     if missing_field:
         try:
-            llm_result = extract_missing_data(text, missing_field)
-
+            llm_result = extract_missing_data_groq(text, missing_field)
         except Exception as e:
             # Log it, but don't crash
             print(f"LLM extraction failed: {e}")
-    if not llm_result:
-        try:
-            llm_result = extract_missing_data_groq(text, missing_field)
-
-        except Exception as e:
-            print(f"Groq failed: {e}")
-        llm_result = extract_missing_data_groq(text, missing_field)
+        if not llm_result:
+            try:
+                llm_result = extract_missing_data_gemini(text, missing_field)
+            except Exception as e:
+                print(f"Groq failed: {e}")
     for field in missing_field:
         value = llm_result.get(field)
         if value:
             parsed_text[field] = llm_result[field]
+
+    line_items = {}
+    try:
+        line_items = extract_line_items_groq(text)
+
+    except Exception as e:
+        print(f"LLM Extraction failed: {e}")
+
+    if not line_items:
+        try:
+            line_items = extract_line_items_gemini(text)
+        except Exception as e:
+            print(f"LLM Extraction failed: {e}")
+    parsed_text['line_items'] = line_items
+
+
 
     return parsed_text

@@ -9,7 +9,7 @@ from openai import OpenAI
 load_dotenv()
 
 
-def extract_missing_data(text: str, missing_data: list) -> dict:
+def extract_missing_data_gemini(text: str, missing_data: list) -> dict:
     if not text:
         return {}
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
@@ -81,3 +81,86 @@ Invoice text:
         if response.choices[0].message.content
         else {}
     )
+# LineItems Extraction
+
+def extract_line_items_gemini(text:str) -> list:
+    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+    prompt = f'''You are an invoice parser. Extract all line items from this invoice text.
+
+Return a JSON object with a single key "line_items" containing an array.
+
+Each item in the array should have:
+- description: the full item description (the text in the "Description" or "Item" column)
+- quantity: the quantity (number, or null if not shown)
+- unit_price: the price per unit (number, no currency symbols, or null if not shown)
+- amount: the final line total after tax (number, no currency symbols)
+
+Rules:
+- Do NOT include trailing colons or punctuation in the description.
+- If quantity is shown, unit_price × quantity may not equal amount — amount includes tax.
+- Return numbers only, never strings.
+
+If no line items are found, return {{"line_items": []}}.
+
+Example:
+{{
+"line_items": [
+    {{"description": "Boat Earphones", "quantity": 1, "unit_price": 295.76, "amount": 349.00}},
+    {{"description": "Shipping Charges", "quantity": 1, "unit_price": 66.94, "amount": 79.00}}
+]
+}}
+
+Invoice text:
+{text}'''
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt,
+        config=types.GenerateContentConfig(response_mime_type='application/json')
+    )
+    content = response.text
+    if not content:
+        return []
+    parsed = json.loads(content)
+    return parsed.get('line_items',[])
+
+def extract_line_items_groq(text:str) -> list:
+    if not text:
+        return []
+    client = OpenAI(base_url="https://api.groq.com/openai/v1",api_key=os.getenv('GROQ_API_KEY'))
+    prompt = f'''You are an invoice parser. Extract all line items from this invoice text.
+
+Return a JSON object with a single key "line_items" containing an array.
+
+Each item in the array should have:
+- description: the full item description (the text in the "Description" or "Item" column)
+- quantity: the quantity (number, or null if not shown)
+- unit_price: the price per unit (number, no currency symbols, or null if not shown)
+- amount: the final line total after tax (number, no currency symbols)
+
+Rules:
+- Do NOT include trailing colons or punctuation in the description.
+- If quantity is shown, unit_price × quantity may not equal amount — amount includes tax.
+- Return numbers only, never strings.
+
+If no line items are found, return {{"line_items": []}}.
+
+Example:
+{{
+"line_items": [
+    {{"description": "Boat Earphones", "quantity": 1, "unit_price": 295.76, "amount": 349.00}},
+    {{"description": "Shipping Charges", "quantity": 1, "unit_price": 66.94, "amount": 79.00}}
+]
+}}
+
+Invoice text:
+{text}'''
+    response = client.chat.completions.create(
+    model="openai/gpt-oss-120b",
+    messages=[{'role':'user','content':prompt}],
+    response_format={"type":'json_object'}
+    )
+    raw = response.choices[0].message.content
+    if not raw:
+        return []
+    return json.loads(raw).get("line_items", [])
+
