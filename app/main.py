@@ -1,9 +1,10 @@
 # here we import fastapi and uploadfile -  it handle the file uploading thing without adding unnecessiory things and import File - it is a file class
 # import os to handle os level task like make filder and join file paths
+import uuid
 import os
-
+from app.tasks import process_file
 from fastapi import FastAPI, File, HTTPException, UploadFile
-
+from crud_batch import create_batch
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
 from crud_invoice import create_invoice
@@ -114,3 +115,25 @@ def parse_file(file_id: int):
     "parsed_data": parsed_dict
 }
 
+@app.post("/batch-upload")
+async def batch_upload(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400,detail='No files provided. Please upload at least one file.')
+
+    batch_id = create_batch(len(files))
+    upload_file_ids = []
+    for file in files:
+        filename= file.filename or 'unnamed_file'
+        filepath = os.path.join(UPLOAD_DIR, f'{uuid.uuid4().hex}_{filename}')
+        read_file =  await file.read()
+        with open(filepath , 'wb') as f:
+
+            f.write(read_file)
+        file_id = create_uploaded_file(filename=filename ,size=len(read_file), filepath=filepath , batch_id=batch_id).id
+        upload_file_ids.append(file_id)
+
+    for file_id in upload_file_ids:
+
+        process_file.delay(file_id)
+
+    return {"batch_id": batch_id, "total_files": len(files), "status": "queued"}

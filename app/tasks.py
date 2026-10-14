@@ -33,6 +33,7 @@ def process_file(file_id:int):
 
             create_invoice(parsed_text,file_id)
 
+
             file.status = "completed"
             if batch:
                 batch.completed_files += 1

@@ -1,14 +1,13 @@
 import os
-
 from sqlmodel import Session, select
 
 from app.database import engine
-from app.models import UploadedFile
+from app.models import UploadedFile,Batch
 
 
-def create_uploaded_file(filename: str, size: int, filepath: str):
+def create_uploaded_file(filename: str, size: int, filepath: str, batch_id:int=None):
     with Session(engine) as session:
-        record = UploadedFile(filename=filename, filepath=filepath, size=size)
+        record = UploadedFile(filename=filename, filepath=filepath, size=size , batch_id=batch_id)
         session.add(record)
         session.commit()
         session.refresh(record)
@@ -59,3 +58,4 @@ def update_extracted_text(file_id: int, text: str | None):
         session.commit()
         session.refresh(file)
     return file
+
