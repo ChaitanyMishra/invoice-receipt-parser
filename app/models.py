@@ -1,6 +1,11 @@
 import datetime
+from operator import ge
+from typing import Optional
 
+from PIL.EpsImagePlugin import field
 from sqlmodel import Field, SQLModel
+import sqlmodel
+from tomlkit import table
 
 
 class Invoice(SQLModel, table=True):
@@ -33,7 +38,7 @@ class LineItem(SQLModel, table=True):
 
     # item info
     amount: float
-    description: str 
+    description: str
     unit_price: float | None = Field(default=None)
     quantity: float | None = Field(default=None)
 
@@ -45,3 +50,14 @@ class UploadedFile(SQLModel, table=True):
     filepath: str
     uploaded_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
     extracted_text: str | None = Field(default=None)
+    batch_id: int | None = Field(foreign_key='batch.id' , default=None)
+    status: str = Field(default="pending")
+
+
+class Batch(SQLModel,table=True):
+    id:Optional[int]=Field(default=None, primary_key=True)
+    created_at:datetime.datetime = Field(default_factory=datetime.datetime.now)
+    total_files:int=Field(ge=0)
+    completed_files:int=Field(default=0)
+    failed_files:int=Field(default=0)
+    status:str  # Values: "pending", "processing", "completed", "partial", "failed"
