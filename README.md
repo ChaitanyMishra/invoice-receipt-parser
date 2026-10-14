@@ -288,7 +288,7 @@ Separating them means re-parsing does not require re-extracting, extracted text 
 - [x] Regex-based field extraction
 - [x] LLM fallback (Gemini → Groq)
 - [x] Idempotent database save
-- [ ] Line-item extraction from tables
+- [x] Line-item extraction from tables
 - [ ] JWT authentication
 - [ ] Docker and deployment (Render / Railway)
 - [ ] OCR for scanned PDFs (Tesseract)
