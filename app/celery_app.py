@@ -13,4 +13,5 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Asia/Kolkata",
     enable_utc=True,
+
 )

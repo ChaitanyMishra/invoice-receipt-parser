@@ -1,4 +1,4 @@
-from sqlmodel import Session , select
+from sqlmodel import Session,update
 from app.database import engine
 from app.models import Batch, UploadedFile
 from app.celery_app import celery_app
@@ -6,7 +6,12 @@ from app.services.pdf_extractor import extract_text_from_pdf
 from app.services.invoice_parser import parse_invoice_text
 from crud_invoice import create_invoice
 
-@celery_app.task
+@celery_app.task(autoretry_for=(ConnectionError,TimeoutError),
+        retry_backoff=True,
+        retry_backoff_max=600,
+        retry_jitter=True,
+        max_retries=3
+        )
 def process_file(file_id:int):
     with Session(engine) as session:
         file = session.get(UploadedFile,file_id)
@@ -36,16 +41,22 @@ def process_file(file_id:int):
 
             file.status = "completed"
             if batch:
-                batch.completed_files += 1
+                session.exec(update(Batch).where(Batch.id==batch.id).values(completed_files=Batch.completed_files+1))
+
             print(f"Task file_id={file_id}: completed")
 
+        except (ConnectionError,TimeoutError):
+            raise
+
         except Exception as e:
+            session.rollback()
             file.status='failed'
             if batch:
-                batch.failed_files+=1
-                print(f"Task file_id={file_id} failed: {e}")
+                session.exec(update(Batch).where(Batch.id==batch.id).values(failed_files=Batch.failed_files+1))
+            print(f"Task file_id={file_id} failed: {e}")
 
         if batch:
+            session.refresh(batch)
             done = batch.completed_files+batch.failed_files
             if done >= batch.total_files:
                 batch.status='completed' if batch.failed_files == 0  else  'partial'

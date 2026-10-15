@@ -34,3 +34,9 @@ test_data.py
 test_model.py
 test_pdfplumbert.py
 test_gemin_key.py
+
+# Test data (contains third-party invoices)
+sample-invoices/
+
+# Learning scratchpad
+test_skills/

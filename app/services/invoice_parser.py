@@ -51,18 +51,19 @@ def parse_invoice_text(text: str) -> dict:
             llm_result = extract_missing_data_groq(text, missing_field)
         except Exception as e:
             # Log it, but don't crash
-            print(f"LLM extraction failed: {e}")
-        if not llm_result:
-            try:
-                llm_result = extract_missing_data_gemini(text, missing_field)
-            except Exception as e:
-                print(f"Groq failed: {e}")
-    for field in missing_field:
-        value = llm_result.get(field)
-        if value:
-            parsed_text[field] = llm_result[field]
+            print(f"Groq failed: {e}")
+    if not llm_result:
+        try:
+            llm_result = extract_missing_data_gemini(text, missing_field)
+        except Exception as e:
+            print(f"Gemini failed: {e}")
+    if isinstance(llm_result,dict):
+        for field in missing_field:
+            value = llm_result.get(field)
+            if value:
+                parsed_text[field] = value
 
-    line_items = {}
+    line_items = []
     try:
         line_items = extract_line_items_groq(text)
 
