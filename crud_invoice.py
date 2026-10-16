@@ -66,7 +66,7 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
                 line_item = LineItem(
                     invoice_id=existing.id,
                     description=item["description"],
-                    amount=item["amount"],
+                    amount=float(item["amount"]) if item.get("amount") is not None else 0.0,
                     unit_price=float(item["unit_price"])
                     if item.get("unit_price") is not None
                     else None,
@@ -81,9 +81,7 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
             return existing.id
         invoice = Invoice(
             total=float(parsed_data.get("total")) if parsed_data.get("total") else None,
-            tax_amount=(
-                parsed_data.get("tax_amount") if parsed_data.get("tax_amount") else None
-            ),
+            tax_amount=float(parsed_data.get("tax_amount")) if parsed_data.get("tax_amount") else None,
             order_number=parsed_data.get("order_number"),
             invoice_number=parsed_data.get("invoice_number"),
             date=parsed_date,

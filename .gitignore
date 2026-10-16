@@ -40,3 +40,8 @@ sample-invoices/
 
 # Learning scratchpad
 test_skills/
+# Test data (contains third-party invoices)
+test_data/
+
+# Old location
+sample-invoices/

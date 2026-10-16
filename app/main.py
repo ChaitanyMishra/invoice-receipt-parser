@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from crud_batch import create_batch
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
+from fastapi.staticfiles import StaticFiles
 from crud_invoice import create_invoice
 from crud_uploaded_file import (
     create_uploaded_file,
@@ -24,12 +25,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # inharit the fastapi method which provide us fastapi methods like creating routs and many more
 app = FastAPI()
 
-
 # decoratior which take get request on /  meens root
-@app.get("/")
+@app.get("/health")
 def invoice_parser():
     # return ok
-    return {"message": "Wellcome to Invoice Parser"}
+    return {"status": "ok"}
 
 
 # it is a post request where we send data to fastapi for upload url path
@@ -137,3 +137,5 @@ async def batch_upload(files: list[UploadFile] = File(...)):
         process_file.delay(file_id)
 
     return {"batch_id": batch_id, "total_files": len(files), "status": "queued"}
+
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

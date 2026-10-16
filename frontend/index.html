@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Invoice &amp; Receipt Parser</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <h1>Invoice &amp; Receipt Parser</h1>
+        <p>Upload documents, extract their text, and review parsed invoice details.</p>
+      </header>
+
+      <p id="error-message" class="error-message" role="alert" hidden></p>
+      <p id="loading-message" class="loading-message" aria-live="polite" hidden>Loading...</p>
+
+      <section class="panel" aria-labelledby="upload-heading">
+        <h2 id="upload-heading">Upload files</h2>
+        <div class="upload-grid">
+          <form id="single-upload-form" class="upload-form">
+            <label for="single-file">One PDF or image</label>
+            <input id="single-file" name="file" type="file" accept=".pdf,image/jpeg,image/png" required>
+            <button type="submit">Upload file</button>
+          </form>
+
+          <form id="batch-upload-form" class="upload-form">
+            <label for="batch-files">Multiple PDFs or images</label>
+            <input id="batch-files" name="files" type="file" accept=".pdf,image/jpeg,image/png" multiple required>
+            <button type="submit">Upload batch</button>
+          </form>
+        </div>
+        <p id="batch-notice" class="muted" aria-live="polite"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="files-heading">
+        <div class="section-heading">
+          <h2 id="files-heading">Uploaded files</h2>
+          <div class="section-actions">
+            <button id="download-excel" type="button">Download Excel</button>
+            <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Filename</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="files-body">
+              <tr><td class="empty-state" colspan="4">Loading files...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="result-section" class="panel result-panel" aria-labelledby="result-heading" hidden>
+        <h2 id="result-heading">Parsed invoice</h2>
+        <div id="invoice-content"></div>
+      </section>
+    </main>
+  </body>
+</html>
