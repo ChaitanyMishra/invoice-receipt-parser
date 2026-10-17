@@ -8,32 +8,22 @@ services:
     name: redis
     plan: free
     ipAllowList: []
+    maxmemoryPolicy: noeviction
 
   - type: web
     name: invoice-web
-    plan: free
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile
     envVars:
       - key: DB_URL
         fromDatabase:
           name: invoicedb
           property: connectionString
-      - key: GROQ_API_KEY
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-
-  - type: worker
-    name: invoice-worker
-    plan: free
-    env: docker
-    dockerfilePath: ./Dockerfile
-    dockerCommand: celery -A app.celery_app worker --loglevel=info --concurrency=2
-    envVars:
-      - key: DB_URL
-        fromDatabase:
-          name: invoicedb
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: redis
           property: connectionString
       - key: GROQ_API_KEY
         sync: false
