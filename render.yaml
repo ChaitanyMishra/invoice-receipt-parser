@@ -6,7 +6,7 @@ databases:
 services:
   - type: redis
     name: redis
-    plan:  free
+    plan: free
     ipAllowList: []
 
   - type: web
@@ -26,7 +26,8 @@ services:
   - type: worker
     name: invoice-worker
     env: docker
-    dockerfilePath: ././Dockerfile
+    dockerfilePath: ./Dockerfile
+    dockerCommand: celery -A app.celery_app worker --loglevel=info --concurrency=2
     envVars:
       - key: DB_URL
         fromDatabase:
@@ -36,4 +37,3 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-
