@@ -1,0 +1,39 @@
+databases:
+  - name: invoicedb
+    databaseName: invoicedb
+    user: postgres
+
+services:
+  - type: redis
+    name: redis
+    plan:  free
+    ipAllowList: []
+
+  - type: web
+    name: invoice-web
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: invoicedb
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+  - type: worker
+    name: invoice-worker
+    env: docker
+    dockerfilePath: ././Dockerfile
+    envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: invoicedb
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
