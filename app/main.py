@@ -1,13 +1,12 @@
-# here we import fastapi and uploadfile -  it handle the file uploading thing without adding unnecessiory things and import File - it is a file class
-# import os to handle os level task like make filder and join file paths
-import uuid
 import os
-from app.tasks import process_file
+import uuid
+import re
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from crud_batch import create_batch
-from app.services.invoice_parser import parse_invoice_text
-from app.services.pdf_extractor import extract_text_from_pdf
 from fastapi.staticfiles import StaticFiles
+from app.tasks import process_file
+from app.services.invoice_parser import parse_invoice_text,extract_field
+from app.services.pdf_extractor import extract_text_from_pdf
+from crud_batch import create_batch
 from crud_invoice import create_invoice
 from crud_uploaded_file import (
     create_uploaded_file,
@@ -16,43 +15,52 @@ from crud_uploaded_file import (
     get_file_by_id,
     update_extracted_text,
 )
-
-# just a variable
 UPLOAD_DIR = "uploads"
-# os make new folder with name of uploads , exsist_ok = if not created create onece and if already exsist do nothing
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# inharit the fastapi method which provide us fastapi methods like creating routs and many more
 app = FastAPI()
 
-# decoratior which take get request on /  meens root
+def invoice_count(text:str):
+    patterns = [
+        r"Invoice Number\s*:\s*(\S+)",                      # Amazon
+        r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",         # Supercloud (with "Dated" label)
+        r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",          # Supercloud (no "Dated")
+        r"Bill No\.?\s*:?\s*(\S+)",
+        ]
+    unique_match = set()
+
+    for pattern in patterns:
+        for m in (re.findall(pattern , text ,flags=0)):
+            unique_match.add(m)
+
+    if len(unique_match) > 1:
+        return False
+    return True
+
 @app.get("/health")
-def invoice_parser():
-    # return ok
+def health_check():
     return {"status": "ok"}
 
 
-# it is a post request where we send data to fastapi for upload url path
 @app.post("/files")
-# async fun because we have to handle file reading and uploading which takes time and file inharit uploadFile to access there methods which is type of File and ... meens required
 async def upload_file(file: UploadFile = File(...)):
-    # it allowed only these type of files other then that not allowed to upload
     ALLOWED = {"image/jpeg", "image/png", "application/pdf"}
     if file.content_type not in ALLOWED:
-        return {"error": "Only JPG, PNG, PDF allowed"}
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, PDF allowed")
 
-    # read the file file is in byte object and await meens it read 1st then execute next line
-    readFile = await file.read()
-    # variable which create unique file path to add on uploads folder
-    filePath = os.path.join(UPLOAD_DIR, file.filename)
-    # open filePath as wb - write bytes to write images in byte obj form as f and write it create new file ex - /uploads/ac.pdf if not exsist and write
-    with open(filePath, "wb") as f:
-        f.write(readFile)
+    read_file = await file.read()
+    filename = file.filename or "unnamed_file"
+
+    # FIXED: Added UUID prefix to prevent file overwriting collisions
+    filepath = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}_{filename}")
+
+    with open(filepath, "wb") as f:
+        f.write(read_file)
+
     record = create_uploaded_file(
-        filename=file.filename, size=len(readFile), filepath=filePath
+        filename=filename, size=len(read_file), filepath=filepath
     )
-    # return success msg with filename and size of file
-    return {"id": record.id, "filename": file.filename, "size": len(readFile)}
+    return {"id": record.id, "filename": filename, "size": len(read_file)}
 
 
 @app.get("/get_upload_data")
@@ -63,10 +71,9 @@ def get_documents():
 @app.get("/files/{file_id}")
 def get_file(file_id: int):
     file = get_file_by_id(file_id)
-    if file:
-        return file
-    else:
+    if not file:
         raise HTTPException(status_code=404, detail="file not found")
+    return file
 
 
 @app.delete("/files/{file_id}")
@@ -82,16 +89,16 @@ def extract_file(file_id: int):
     file = get_file_by_id(file_id)
     if not file:
         raise HTTPException(status_code=404, detail="file not found")
-    file_path = file.filepath
-    extracted_text = extract_text_from_pdf(file_path)
 
+    extracted_text = extract_text_from_pdf(file.filepath)
     if not extracted_text:
         return {
             "status": "no_text_extracted",
             "file_id": file_id,
-            "note": "File has no extractable text. Likely scanned PDF or image. OCR fallback coming soon.",
+            "note": "File has no extractable text. Likely scanned PDF or image.",
         }
     update_extracted_text(file_id, extracted_text)
+
     return {
         "status": "extracted",
         "file_id": file_id,
@@ -103,39 +110,49 @@ def extract_file(file_id: int):
 @app.post("/files/{file_id}/parse")
 def parse_file(file_id: int):
     file = get_file_by_id(file_id)
-    parsed_text = file.extracted_text
-    parsed_dict = parse_invoice_text(parsed_text)
+    if not file or not file.extracted_text:
+        raise HTTPException(status_code=404, detail="File or extracted text not found")
+
+    if not invoice_count(file.extracted_text):
+            raise HTTPException(status_code=400,detail='pdf contains more than 1  invoice  ')
+    parsed_dict = parse_invoice_text(file.extracted_text)
     if not parsed_dict:
-        raise HTTPException(status_code=404, detail=f"data is missing {parsed_dict}")
-    # invoice = create_invoice(parsed_dict, file_id)
+        raise HTTPException(status_code=400, detail="Failed to parse invoice data")
+
     invoice_id = create_invoice(parsed_dict, file_id)
     return {
-    "status": "parsed",
-    "invoice_id": invoice_id,
-    "parsed_data": parsed_dict
-}
+        "status": "parsed",
+        "invoice_id": invoice_id,
+        "parsed_data": parsed_dict,
+    }
+
 
 @app.post("/batch-upload")
 async def batch_upload(files: list[UploadFile] = File(...)):
     if not files:
-        raise HTTPException(status_code=400,detail='No files provided. Please upload at least one file.')
+        raise HTTPException(status_code=400, detail="No files provided.")
 
     batch_id = create_batch(len(files))
     upload_file_ids = []
-    for file in files:
-        filename= file.filename or 'unnamed_file'
-        filepath = os.path.join(UPLOAD_DIR, f'{uuid.uuid4().hex}_{filename}')
-        read_file =  await file.read()
-        with open(filepath , 'wb') as f:
 
+    for file in files:
+        filename = file.filename or "unnamed_file"
+        filepath = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}_{filename}")
+        read_file = await file.read()
+
+        with open(filepath, "wb") as f:
             f.write(read_file)
-        file_id = create_uploaded_file(filename=filename ,size=len(read_file), filepath=filepath , batch_id=batch_id).id
+
+        file_id = create_uploaded_file(
+            filename=filename, size=len(read_file), filepath=filepath, batch_id=batch_id
+        ).id
         upload_file_ids.append(file_id)
 
     for file_id in upload_file_ids:
-
         process_file.delay(file_id)
 
     return {"batch_id": batch_id, "total_files": len(files), "status": "queued"}
 
+
+# Static files mounted last so API routes take precedence
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

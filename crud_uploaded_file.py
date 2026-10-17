@@ -1,8 +1,8 @@
 import os
-from sqlmodel import Session, select
+from sqlmodel import Session, select,delete
 
 from app.database import engine
-from app.models import UploadedFile,Batch
+from app.models import Invoice, LineItem, UploadedFile,Batch
 
 
 def create_uploaded_file(filename: str, size: int, filepath: str, batch_id:int=None):
@@ -30,13 +30,17 @@ def get_file_by_id(id: int):
 def delete_file(id: int):
     filepath = None
     with Session(engine) as session:
-        statement = select(UploadedFile).where(UploadedFile.id == id)
-        result = session.exec(statement)
-        file = result.first()
+        file = session.get(UploadedFile,id)
         if not file:
             return None
 
         filepath = file.filepath
+        inv = select(Invoice).where(Invoice.uploaded_file_id == id)
+        res = session.exec(inv).first()
+        if res:
+            session.exec(delete(LineItem).where(LineItem.invoice_id == res.id))
+            session.delete(res)
+            session.flush()
         session.delete(file)
         session.commit()
     try:

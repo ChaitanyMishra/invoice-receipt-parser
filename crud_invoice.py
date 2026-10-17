@@ -6,7 +6,13 @@ from app.database import engine
 from app.models import Invoice, LineItem
 
 # from app.services.llm_extractor import extract_missing_data_groq,extract_missing_data
-
+def to_float(value):
+    if not value:
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except ValueError:
+        return None
 def parse_date(value: str) -> datetime.date:
         DATE_FORMATS = [
     "%d.%m.%Y",   # 30.04.2025
@@ -29,9 +35,9 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
     date_str = parsed_data.get("date")
     parsed_date = parse_date(date_str) if date_str else None
     total_str = parsed_data.get("total")
-    total_amount = float(total_str) if total_str else None
+    total_amount = to_float(total_str) if total_str else None
     tax_str = parsed_data.get("tax_amount")
-    total_tax = float(tax_str) if tax_str else None
+    total_tax = to_float(tax_str) if tax_str else None
     sub_total = (
         (total_amount - total_tax)
         if (total_amount is not None and total_tax is not None)
