@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment (IMPORTANT - Docker uses its own Python)
+venv/
+
+# Local Environment variables (we'll pass these in via Docker Compose, not a file)
+.env
+
+# Test & Scratch files (don't need them in production image)
+test_skills/
+test_data/
+sample-invoices/
+test_*.py
+test.py
+
+# Local uploads (the container will create its own)
+uploads/
