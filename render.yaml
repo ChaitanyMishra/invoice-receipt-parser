@@ -1,7 +1,6 @@
 databases:
   - name: invoicedb
     databaseName: invoicedb
-    user: postgres
 
 services:
   - type: redis
