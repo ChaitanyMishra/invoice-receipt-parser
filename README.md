@@ -1,4 +1,6 @@
-# Invoice Parser API
+
+# Invoice Parser API 
+**Live Demo:** [https://invoice-web-hw3q.onrender.com](https://invoice-web-hw3q.onrender.com)
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -409,8 +411,8 @@ Separating them means re-parsing does not require re-extracting, extracted text 
 - [x] Idempotent writes (Invoice + batch counters)
 - [x] Basic frontend
 - [ ] Multi-invoice PDF splitting
-- [ ] Docker + docker-compose
-- [ ] Deployment (Render / Railway)
+- [X] Docker + docker-compose
+- [X] Deployment (Render / Railway)
 - [ ] Structured logging
 - [ ] Alembic migrations
 - [ ] pytest test suite
