@@ -3,6 +3,8 @@ import uuid
 import re
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
+from app.database import engine
+from sqlmodel import SQLModel
 from app.tasks import process_file
 from app.services.invoice_parser import parse_invoice_text,extract_field
 from app.services.pdf_extractor import extract_text_from_pdf
@@ -19,6 +21,10 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI()
+
+@app.on_event("startup")
+def startup():
+    SQLModel.metadata.create_all(bind=engine)
 
 def invoice_count(text:str):
     patterns = [
