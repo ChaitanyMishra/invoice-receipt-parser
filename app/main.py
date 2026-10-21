@@ -1,15 +1,22 @@
+import json
 import os
-import uuid
 import re
+import uuid
+
+import redis
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
-from app.database import engine
 from sqlmodel import SQLModel
-from app.tasks import process_file
-from app.services.invoice_parser import parse_invoice_text,extract_field
+
+from app.database import engine
+from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
+from app.tasks import process_file
 from crud_batch import create_batch
 from crud_invoice import create_invoice
+from dotenv import load_dotenv
+load_dotenv()
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"),decode_responses=True)
 from crud_uploaded_file import (
     create_uploaded_file,
     delete_file,
@@ -17,31 +24,35 @@ from crud_uploaded_file import (
     get_file_by_id,
     update_extracted_text,
 )
+
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI()
 
+
 @app.on_event("startup")
 def startup():
     SQLModel.metadata.create_all(bind=engine)
 
-def invoice_count(text:str):
+
+def invoice_count(text: str):
     patterns = [
-        r"Invoice Number\s*:\s*(\S+)",                      # Amazon
-        r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",         # Supercloud (with "Dated" label)
-        r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",          # Supercloud (no "Dated")
+        r"Invoice Number\s*:\s*(\S+)",  # Amazon
+        r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",  # Supercloud (with "Dated" label)
+        r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",  # Supercloud (no "Dated")
         r"Bill No\.?\s*:?\s*(\S+)",
-        ]
+    ]
     unique_match = set()
 
     for pattern in patterns:
-        for m in (re.findall(pattern , text ,flags=0)):
+        for m in re.findall(pattern, text, flags=0):
             unique_match.add(m)
 
     if len(unique_match) > 1:
         return False
     return True
+
 
 @app.get("/health")
 def health_check():
@@ -66,12 +77,23 @@ async def upload_file(file: UploadFile = File(...)):
     record = create_uploaded_file(
         filename=filename, size=len(read_file), filepath=filepath
     )
+    redis_client.delete("my_files")
     return {"id": record.id, "filename": filename, "size": len(read_file)}
 
 
 @app.get("/get_upload_data")
 def get_documents():
-    return files()
+    redis_cache = redis_client.get("my_files")
+    if redis_cache:
+        print("CACHE HIT")
+        return json.loads(redis_cache)
+
+    print("CACHE MISS")
+    db_files = files()
+    file_list = [f.model_dump() for f in db_files]
+    redis_client.set("my_files", json.dumps(file_list, default=str), ex=60)
+
+    return db_files
 
 
 @app.get("/files/{file_id}")
@@ -87,6 +109,7 @@ def del_file(file_id: int):
     res = delete_file(file_id)
     if not res:
         raise HTTPException(status_code=404, detail="file not found")
+    redis_client.delete("my_files")
     return res
 
 
@@ -120,7 +143,9 @@ def parse_file(file_id: int):
         raise HTTPException(status_code=404, detail="File or extracted text not found")
 
     if not invoice_count(file.extracted_text):
-            raise HTTPException(status_code=400,detail='pdf contains more than 1  invoice  ')
+        raise HTTPException(
+            status_code=400, detail="pdf contains more than 1  invoice  "
+        )
     parsed_dict = parse_invoice_text(file.extracted_text)
     if not parsed_dict:
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
@@ -153,6 +178,7 @@ async def batch_upload(files: list[UploadFile] = File(...)):
             filename=filename, size=len(read_file), filepath=filepath, batch_id=batch_id
         ).id
         upload_file_ids.append(file_id)
+        redis_client.delete("my_files")
 
     for file_id in upload_file_ids:
         process_file.delay(file_id)
