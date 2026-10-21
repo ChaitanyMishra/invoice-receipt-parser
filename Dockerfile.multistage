@@ -1,0 +1,26 @@
+# Stage 1 builder: here we install all dependencies
+
+# its an lightweigh python directly installed in docker AS builder tell docker its and builder command
+FROM python:3.12-slim AS builder
+
+# it tell docker our main directory all necessary endpoints and entry
+WORKDIR /app
+
+# Copy the requirement.txt in docker
+COPY requirements.txt .
+# install the copied requirement --user means installed locally not globally
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage 2 Runner: here we copy dependencies from builder and make image
+FROM python:3.12-slim
+WORKDIR /app
+# it tell copy all code from builder where we install dependencies location is /root/.local means copy data from local and paste in local also
+COPY --from=builder /root/.local /root/.local
+# Copy other code whole file code
+COPY  . .
+# it change the file type default files are not meant for execution it change to executable files
+RUN chmod +x start.sh
+# Copy the ENV data
+ENV PATH = /root/.local/bin:${PATH}
+# Execute the Container
+CMD [ "sh","start.sh" ]

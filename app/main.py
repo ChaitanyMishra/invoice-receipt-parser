@@ -162,3 +162,4 @@ async def batch_upload(files: list[UploadFile] = File(...)):
 
 # Static files mounted last so API routes take precedence
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+# this is a test comment
