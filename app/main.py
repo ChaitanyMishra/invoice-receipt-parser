@@ -4,19 +4,41 @@ import re
 import uuid
 
 import redis
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, EmailStr
 from sqlmodel import SQLModel
 
+from app.auth import (
+    create_access_token,
+    decode_access_token,
+    get_password_hash,
+    verify_hash_password,
+)
 from app.database import engine
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
 from app.tasks import process_file
 from crud_batch import create_batch
 from crud_invoice import create_invoice
-from dotenv import load_dotenv
+from crud_user import create_user, get_user_by_email
+
 load_dotenv()
-redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"),decode_responses=True)
+
+
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserLogin(BaseModel):
+    username: EmailStr
+    password: str
+
+
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"), decode_responses=True)  # type: ignore
 from crud_uploaded_file import (
     create_uploaded_file,
     delete_file,
@@ -29,6 +51,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
 @app.on_event("startup")
@@ -54,13 +77,28 @@ def invoice_count(text: str):
     return True
 
 
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    valid_user = decode_access_token(token)
+    if not valid_user:
+        raise HTTPException(status_code=401, detail="Unauthorized user")
+    user_mail = valid_user.get("email")
+    user = get_user_by_email(user_mail)
+    if not user:
+        raise HTTPException(status_code=401, detail="user not exists")
+    return user
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
 @app.post("/files")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...), current_user: str = Depends(get_current_user)
+):
+    if not current_user:
+        return None
     ALLOWED = {"image/jpeg", "image/png", "application/pdf"}
     if file.content_type not in ALLOWED:
         raise HTTPException(status_code=400, detail="Only JPG, PNG, PDF allowed")
@@ -171,7 +209,7 @@ async def batch_upload(files: list[UploadFile] = File(...)):
         filepath = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}_{filename}")
         read_file = await file.read()
 
-        with open(filepath, "wb") as f:
+        with open(filepath, "wb") as f:  # noqa: ASYNC230
             f.write(read_file)
 
         file_id = create_uploaded_file(
@@ -184,6 +222,36 @@ async def batch_upload(files: list[UploadFile] = File(...)):
         process_file.delay(file_id)
 
     return {"batch_id": batch_id, "total_files": len(files), "status": "queued"}
+
+
+@app.post("/register", status_code=201)
+def register_user(user_data: UserRegister):
+
+    existing_user = get_user_by_email(user_data.email)
+    if existing_user:
+        raise HTTPException(status_code=409, detail="user already exists")
+    hashed_password = get_password_hash(user_data.password)
+
+    new_user = create_user(user_data.email, hashed_password)  # type: ignore
+    return {"message": "registration successful!", "user_id": new_user.id}
+
+
+@app.post("/login")
+def login(form_data:OAuth2PasswordRequestForm=Depends()):
+    existing_user = get_user_by_email(form_data.username)
+    print(f"USER FOUND: {existing_user is not None}")
+    if not existing_user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    is_valid = verify_hash_password(form_data.password, existing_user.hashed_password)
+    print(f"PASSWORD VALID: {is_valid}")
+
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    access_token = create_access_token({"email": existing_user.email})
+    print(access_token)
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # Static files mounted last so API routes take precedence

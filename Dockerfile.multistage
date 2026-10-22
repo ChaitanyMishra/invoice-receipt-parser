@@ -1,26 +1,38 @@
-# Stage 1 builder: here we install all dependencies
+# Stage 1: Builder
 
-# its an lightweigh python directly installed in docker AS builder tell docker its and builder command
+# We name this stage "builder". This is just a label so Stage 2 can copy files from it later.
 FROM python:3.12-slim AS builder
 
-# it tell docker our main directory all necessary endpoints and entry
 WORKDIR /app
 
-# Copy the requirement.txt in docker
+# Copy only the requirements file first. This allows Docker to cache this step.
+# If we change our code later, Docker won't re-download all the libraries again.
 COPY requirements.txt .
-# install the copied requirement --user means installed locally not globally
+
+# Install dependencies into /root/.local (the --user flag).
+# --no-cache-dir keeps the image small by not saving the downloaded installers.
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Stage 2 Runner: here we copy dependencies from builder and make image
+# Stage 2: Runner
+# Start a fresh, clean image. It does not contain any of the C++ compilers used in Stage 1.
 FROM python:3.12-slim
+
 WORKDIR /app
-# it tell copy all code from builder where we install dependencies location is /root/.local means copy data from local and paste in local also
+
+# Copy ONLY the installed Python packages from the builder stage.
+# This brings our FastAPI, SQLModel, and Celery libraries into this clean image.
 COPY --from=builder /root/.local /root/.local
-# Copy other code whole file code
-COPY  . .
-# it change the file type default files are not meant for execution it change to executable files
+
+# Copy the rest of our source code (app/, frontend/, etc.)
+COPY . .
+
+# Make the start.sh script executable so the container is allowed to run it.
 RUN chmod +x start.sh
-# Copy the ENV data
-ENV PATH = /root/.local/bin:${PATH}
-# Execute the Container
-CMD [ "sh","start.sh" ]
+
+# Tell Linux to look in /root/.local/bin for commands like `uvicorn` and `celery`.
+# Without this, the container won't know where these programs are installed.
+ENV PATH=/root/.local/bin:${PATH}
+
+# The main process that runs when the container starts.
+# It executes start.sh, which runs both Uvicorn and Celery.
+CMD ["sh", "start.sh"]

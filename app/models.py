@@ -45,6 +45,7 @@ class LineItem(SQLModel, table=True):
 
 class UploadedFile(SQLModel, table=True):
     id: int | None = Field(primary_key=True, default=None)
+    user_id:int|None=Field(foreign_key='user.id')
     filename: str
     size: int
     filepath: str
@@ -61,3 +62,8 @@ class Batch(SQLModel,table=True):
     completed_files:int=Field(default=0)
     failed_files:int=Field(default=0)
     status:str  # Values: "pending", "processing", "completed", "partial", "failed"
+class User(SQLModel,table=True):
+    id:int |None=Field(default=None,primary_key=True)
+    email:str=Field(unique=True)
+    hashed_password:str=Field(min_length=8)
+    created_at:datetime.datetime=Field(default_factory=datetime.datetime.now)
