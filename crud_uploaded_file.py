@@ -1,36 +1,50 @@
 import os
-from sqlmodel import Session, select,delete
+from sqlmodel import Session, select, delete
 
 from app.database import engine
-from app.models import Invoice, LineItem, UploadedFile,Batch
+from app.models import Invoice, LineItem, UploadedFile, Batch
 
 
-def create_uploaded_file(filename: str, size: int, filepath: str, batch_id:int=None):
+# FIX: accept user_id and store it on the record
+def create_uploaded_file(
+    filename: str,
+    size: int,
+    filepath: str,
+    batch_id: int | None = None,
+    user_id: int | None = None,
+):
     with Session(engine) as session:
-        record = UploadedFile(filename=filename, filepath=filepath, size=size , batch_id=batch_id)
+        record = UploadedFile(
+            filename=filename,
+            filepath=filepath,
+            size=size,
+            batch_id=batch_id,
+            user_id=user_id,          # FIX
+        )
         session.add(record)
         session.commit()
         session.refresh(record)
         return record
 
 
-def files():
+# FIX: optional user_id filter; None means "all files" (backwards compatible)
+def files(user_id: int | None = None):
     with Session(engine) as session:
-        statment = select(UploadedFile)
-        table_data = session.exec(statment).all()
-        return table_data
+        statement = select(UploadedFile)
+        if user_id is not None:
+            statement = statement.where(UploadedFile.user_id == user_id)
+        return session.exec(statement).all()
 
 
 def get_file_by_id(id: int):
     with Session(engine) as session:
-        files = session.get(UploadedFile, id)
-        return files
+        return session.get(UploadedFile, id)
 
 
 def delete_file(id: int):
     filepath = None
     with Session(engine) as session:
-        file = session.get(UploadedFile,id)
+        file = session.get(UploadedFile, id)
         if not file:
             return None
 
@@ -43,6 +57,7 @@ def delete_file(id: int):
             session.flush()
         session.delete(file)
         session.commit()
+
     try:
         os.remove(filepath)
     except FileNotFoundError:
@@ -62,4 +77,3 @@ def update_extracted_text(file_id: int, text: str | None):
         session.commit()
         session.refresh(file)
     return file
-

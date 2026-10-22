@@ -17,53 +17,81 @@
       <p id="error-message" class="error-message" role="alert" hidden></p>
       <p id="loading-message" class="loading-message" aria-live="polite" hidden>Loading...</p>
 
-      <section class="panel" aria-labelledby="upload-heading">
-        <h2 id="upload-heading">Upload files</h2>
-        <div class="upload-grid">
-          <form id="single-upload-form" class="upload-form">
-            <label for="single-file">One PDF or image</label>
-            <input id="single-file" name="file" type="file" accept=".pdf,image/jpeg,image/png" required>
-            <button type="submit">Upload file</button>
-          </form>
-
-          <form id="batch-upload-form" class="upload-form">
-            <label for="batch-files">Multiple PDFs or images</label>
-            <input id="batch-files" name="files" type="file" accept=".pdf,image/jpeg,image/png" multiple required>
-            <button type="submit">Upload batch</button>
-          </form>
-        </div>
-        <p id="batch-notice" class="muted" aria-live="polite"></p>
+      <section id="auth-section" class="panel auth-panel" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">Log in</h2>
+        <!-- FIX: Added onsubmit="return false;" to prevent URL leakage -->
+        <form id="login-form" class="auth-form" onsubmit="return false;">
+          <label for="login-username">Email</label>
+          <input id="login-username" name="username" type="email" autocomplete="username" required>
+          <label for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+          <button type="submit">Log in</button>
+        </form>
+        <!-- FIX: Added onsubmit="return false;" to prevent URL leakage -->
+        <form id="register-form" class="auth-form hidden" onsubmit="return false;">
+          <label for="register-username">Email</label>
+          <input id="register-username" name="username" type="email" autocomplete="username" required>
+          <label for="register-password">Password</label>
+          <input id="register-password" name="password" type="password" autocomplete="new-password" required>
+          <button type="submit">Register</button>
+        </form>
+        <button id="auth-toggle" class="secondary-button auth-toggle" type="button">Need an account? Register</button>
       </section>
 
-      <section class="panel" aria-labelledby="files-heading">
-        <div class="section-heading">
-          <h2 id="files-heading">Uploaded files</h2>
-          <div class="section-actions">
-            <button id="download-excel" type="button">Download Excel</button>
-            <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
+      <div id="main-app" class="hidden">
+        <section class="panel" aria-labelledby="upload-heading">
+          <div class="upload-heading">
+            <h2 id="upload-heading">Upload files</h2>
+            <button id="logout-button" class="secondary-button" type="button">Logout</button>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Filename</th>
-                <th scope="col">Status</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="files-body">
-              <tr><td class="empty-state" colspan="4">Loading files...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <div class="upload-grid">
+            <!-- FIX: Added onsubmit="return false;" -->
+            <form id="single-upload-form" class="upload-form" onsubmit="return false;">
+              <label for="single-file">One PDF or image</label>
+              <input id="single-file" name="file" type="file" accept=".pdf,image/jpeg,image/png" required>
+              <button type="submit">Upload file</button>
+            </form>
 
-      <section id="result-section" class="panel result-panel" aria-labelledby="result-heading" hidden>
-        <h2 id="result-heading">Parsed invoice</h2>
-        <div id="invoice-content"></div>
-      </section>
+            <!-- FIX: Added onsubmit="return false;" -->
+            <form id="batch-upload-form" class="upload-form" onsubmit="return false;">
+              <label for="batch-files">Multiple PDFs or images</label>
+              <input id="batch-files" name="files" type="file" accept=".pdf,image/jpeg,image/png" multiple required>
+              <button type="submit">Upload batch</button>
+            </form>
+          </div>
+          <p id="batch-notice" class="muted" aria-live="polite"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="files-heading">
+          <div class="section-heading">
+            <h2 id="files-heading">Uploaded files</h2>
+            <div class="section-actions">
+              <button id="download-excel" type="button">Download Excel</button>
+              <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">ID</th>
+                  <th scope="col">Filename</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="files-body">
+                <tr><td class="empty-state" colspan="4">Loading files...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="result-section" class="panel result-panel" aria-labelledby="result-heading" hidden>
+          <h2 id="result-heading">Parsed invoice</h2>
+          <div id="invoice-content"></div>
+        </section>
+      </div>
     </main>
   </body>
 </html>

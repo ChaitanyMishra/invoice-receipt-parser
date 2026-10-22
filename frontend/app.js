@@ -4,15 +4,34 @@ const filesBody = document.querySelector("#files-body");
 const resultSection = document.querySelector("#result-section");
 const invoiceContent = document.querySelector("#invoice-content");
 const batchNotice = document.querySelector("#batch-notice");
+const authSection = document.querySelector("#auth-section");
+const authHeading = document.querySelector("#auth-heading");
+const loginForm = document.querySelector("#login-form");
+const registerForm = document.querySelector("#register-form");
+const authToggle = document.querySelector("#auth-toggle");
+const mainApp = document.querySelector("#main-app");
 
-// Send all requests through one place so authentication can be added here later.
+// Send all requests through one place so authentication stays consistent.
 async function api(path, options = {}) {
   const { responseType, ...requestOptions } = options;
+  const headers = new Headers(requestOptions.headers || {});
+  const token = localStorage.getItem("token");
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  requestOptions.headers = headers;
+
   let response;
   try {
     response = await fetch(path, requestOptions);
   } catch (error) {
     throw new Error(`Network error (no HTTP status): ${error.message}`);
+  }
+
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    window.location.reload();
+    throw new Error("Your session has expired. Please log in again.");
   }
 
   if (responseType === "blob" && response.ok) {
@@ -36,6 +55,52 @@ async function api(path, options = {}) {
     throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
   }
   return data;
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const credentials = new URLSearchParams(new FormData(loginForm));
+  const result = await api("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: credentials.toString(),
+  });
+  if (!result || !result.access_token) {
+    throw new Error("The login response did not include an access token.");
+  }
+
+  localStorage.setItem("token", result.access_token);
+  authSection.classList.add("hidden");
+  mainApp.classList.remove("hidden");
+  await loadFiles();
+}
+
+async function handleRegister(event) {
+  event.preventDefault();
+  const formData = new FormData(registerForm);
+  await api("/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: formData.get("username"),   // FIX: backend expects "email", not "username"
+      password: formData.get("password"),
+    }),
+  });
+  window.alert("Registration successful. Please log in.");
+  registerForm.reset();
+  showLoginForm();
+}
+
+function handleLogout() {
+  localStorage.removeItem("token");
+  window.location.reload();
+}
+
+function showLoginForm() {
+  loginForm.classList.remove("hidden");
+  registerForm.classList.add("hidden");
+  authHeading.textContent = "Log in";
+  authToggle.textContent = "Need an account? Register";
 }
 
 // Display request activity and temporarily disable every button.
@@ -300,5 +365,36 @@ document.querySelector("#refresh-files").addEventListener("click", () => {
 document.querySelector("#download-excel").addEventListener("click", () => {
   runRequest(downloadInvoices);
 });
+loginForm.addEventListener("submit", (event) => {
+  runRequest(() => handleLogin(event));
+});
+registerForm.addEventListener("submit", (event) => {
+  runRequest(() => handleRegister(event));
+});
+authToggle.addEventListener("click", () => {
+  const showingLogin = !loginForm.classList.contains("hidden");
+  if (showingLogin) {
+    loginForm.classList.add("hidden");
+    registerForm.classList.remove("hidden");
+    authHeading.textContent = "Register";
+    authToggle.textContent = "Already have an account? Log in";
+  } else {
+    showLoginForm();
+  }
+});
+document.querySelector("#logout-button").addEventListener("click", handleLogout);
 
-runRequest(loadFiles);
+function init() {
+  if (localStorage.getItem("token")) {
+    authSection.classList.add("hidden");
+    mainApp.classList.remove("hidden");
+    runRequest(loadFiles);
+    return;
+  }
+
+  showLoginForm();
+  authSection.classList.remove("hidden");
+  mainApp.classList.add("hidden");
+}
+
+init();
