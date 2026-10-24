@@ -1,6 +1,8 @@
+from curses.ascii import HT
 import json
 import os
 import re
+import stat
 import uuid
 
 import redis
@@ -9,9 +11,10 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
+from requests import status_codes
 from sqlmodel import SQLModel
 
-from app.models import User 
+from app.models import User
 from app.auth import (
     create_access_token,
     decode_access_token,
@@ -69,7 +72,7 @@ def invoice_count(text: str):
     return True
 
 
-# FIX: Return type is User, not str
+
 def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
     valid_user = decode_access_token(token)
     if not valid_user:
@@ -131,25 +134,35 @@ def get_documents(current_user: User = Depends(get_current_user)):
 
 
 @app.get("/files/{file_id}")
-def get_file(file_id: int):
+def get_file(file_id: int , current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
     if not file:
         raise HTTPException(status_code=404, detail="file not found")
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this file")
     return file
 
 
 @app.delete("/files/{file_id}")
-def del_file(file_id: int):
+def del_file(file_id: int, current_user:User=Depends(get_current_user)):
+    file = get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="file not found")
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403,detail='Not Authorize')
     res = delete_file(file_id)
     if not res:
         raise HTTPException(status_code=404, detail="file not found")
-    redis_client.delete("my_files")
+    redis_client.delete(f"my_files:user:{current_user.id}")
+
     return res
 
 
 @app.post("/files/{file_id}/extract")
-def extract_file(file_id: int):
+def extract_file(file_id: int , current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403,detail="Not Authorized")
     if not file:
         raise HTTPException(status_code=404, detail="file not found")
 
@@ -161,6 +174,7 @@ def extract_file(file_id: int):
             "note": "File has no extractable text. Likely scanned PDF or image.",
         }
     update_extracted_text(file_id, extracted_text)
+    redis_client.delete(f"my_files:user:{current_user.id}")
 
     return {
         "status": "extracted",
@@ -171,9 +185,15 @@ def extract_file(file_id: int):
 
 
 @app.post("/files/{file_id}/parse")
-def parse_file(file_id: int):
+def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
-    if not file or not file.extracted_text:
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403,detail='Not Authorized')
+    if not file:
+        raise HTTPException(status_code=404, detail="File or extracted text not found")
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403,detail='Not Authorized')
+    if not file.extracted_text:
         raise HTTPException(status_code=404, detail="File or extracted text not found")
 
     if not invoice_count(file.extracted_text):
@@ -185,6 +205,7 @@ def parse_file(file_id: int):
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
 
     invoice_id = create_invoice(parsed_dict, file_id)
+    redis_client.delete(f"my_files:user:{current_user.id}")
     return {
         "status": "parsed",
         "invoice_id": invoice_id,

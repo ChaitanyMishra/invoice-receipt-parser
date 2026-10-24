@@ -11,6 +11,9 @@ const registerForm = document.querySelector("#register-form");
 const authToggle = document.querySelector("#auth-toggle");
 const mainApp = document.querySelector("#main-app");
 
+// Global variable for the auto-refresh interval
+let pollInterval;
+
 // Send all requests through one place so authentication stays consistent.
 async function api(path, options = {}) {
   const { responseType, ...requestOptions } = options;
@@ -72,6 +75,9 @@ async function handleLogin(event) {
   localStorage.setItem("token", result.access_token);
   authSection.classList.add("hidden");
   mainApp.classList.remove("hidden");
+
+  // Start auto-refresh on login
+  startPolling();
   await loadFiles();
 }
 
@@ -82,7 +88,7 @@ async function handleRegister(event) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      email: formData.get("username"),   // FIX: backend expects "email", not "username"
+      email: formData.get("username"),
       password: formData.get("password"),
     }),
   });
@@ -92,6 +98,7 @@ async function handleRegister(event) {
 }
 
 function handleLogout() {
+  stopPolling();
   localStorage.removeItem("token");
   window.location.reload();
 }
@@ -147,6 +154,11 @@ function actionButton(label, className, handler) {
 // Fetch and render the uploaded file records.
 async function loadFiles() {
   const files = await api("/get_upload_data");
+  renderFiles(files);
+}
+
+// Render the table (separated so polling doesn't trigger the loading spinner)
+function renderFiles(files) {
   if (!Array.isArray(files)) {
     throw new Error("The file-list response was not an array.");
   }
@@ -213,8 +225,7 @@ async function uploadBatch(event) {
   input.value = "";
   await loadFiles();
   batchNotice.textContent =
-    `Batch #${result.batch_id} queued (${result.total_files} files). ` +
-    "Progress is unavailable because the backend has no batch-status endpoint.";
+    `Batch #${result.batch_id} queued (${result.total_files} files).`;
 }
 
 // Extract text from a single uploaded file.
@@ -236,26 +247,41 @@ async function parseFile(fileId) {
     method: "POST",
   });
   showInvoice(result.parsed_data, fileId);
+  await loadFiles(); // Update the table status
 }
 
-// Load a file record before parsing it for display.
+// Fetch an already parsed invoice from the database (NO re-parsing).
 async function viewFile(fileId) {
-  const file = await api(`/files/${encodeURIComponent(fileId)}`);
-  if (!file.extracted_text) {
-    throw new Error("No extracted text is available. Click Extract first.");
+  try {
+    const result = await api(`/files/${encodeURIComponent(fileId)}/invoice`);
+    showInvoice(result.parsed_data, fileId);
+  } catch (error) {
+    if (error.message.includes("404")) {
+      throw new Error("This invoice hasn't been parsed yet. Click 'Parse' first.");
+    }
+    throw error;
   }
-  await parseFile(fileId);
 }
 
 // Delete a file and refresh the list.
 async function deleteFile(fileId) {
-  await api(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+  try {
+    await api(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+  } catch (error) {
+    // If it's a 404, the file is already gone. We can ignore it.
+    if (!error.message.includes("404")) {
+      throw error;
+    }
+  }
+
+  // Force a reload of the table
   await loadFiles();
+
+  // Hide the parsed invoice card if it's the one we just deleted
   if (resultSection.dataset.fileId === String(fileId)) {
     resultSection.hidden = true;
   }
 }
-
 // Download the server-generated Excel workbook through the shared API helper.
 async function downloadInvoices() {
   const button = document.querySelector("#download-excel");
@@ -353,6 +379,30 @@ function showInvoice(invoice, fileId) {
   resultSection.scrollIntoView({ block: "start" });
 }
 
+// Polling functions
+function startPolling() {
+  stopPolling(); // Clear any existing interval first
+  pollInterval = setInterval(async () => {
+    // Only poll silently if the app is visible and no request is currently loading
+    if (!mainApp.classList.contains("hidden") && loadingMessage.hidden) {
+      try {
+        const files = await api("/get_upload_data");
+        renderFiles(files);
+      } catch (e) {
+        console.error("Auto-refresh failed:", e);
+      }
+    }
+  }, 5000); // 5 seconds
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// Event Listeners
 document.querySelector("#single-upload-form").addEventListener("submit", (event) => {
   runRequest(() => uploadFile(event));
 });
@@ -388,6 +438,9 @@ function init() {
   if (localStorage.getItem("token")) {
     authSection.classList.add("hidden");
     mainApp.classList.remove("hidden");
+
+    // Start auto-refresh immediately on page load if logged in
+    startPolling();
     runRequest(loadFiles);
     return;
   }
