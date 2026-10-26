@@ -43,5 +43,5 @@ def decode_access_token(token_string:str):
     try:
         decoded_payload =  jwt.decode(token_string,SECRET_KEY,algorithms=[algorithm])
         return decoded_payload
-    except jwt.PyJWTError as e:
+    except jwt.PyJWTError:
         return None

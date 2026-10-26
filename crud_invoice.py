@@ -3,7 +3,7 @@ import datetime
 from sqlmodel import Session, select, delete
 
 from app.database import engine
-from app.models import Invoice, LineItem
+from app.models import Invoice, LineItem, UploadedFile
 
 def to_float(value):
     if not value:
@@ -158,3 +158,14 @@ def delete_invoice(invoice_id: int):
         session.delete(invoice)
         session.commit()
         return "Deleted Sucessfully!"
+
+
+def get_invoice_by_id(user_id:int):
+    with Session(engine) as session:
+        try:
+            statement = select(Invoice).join(UploadedFile).where(UploadedFile.user_id == user_id)
+            result = session.exec(statement).all()
+            return result
+        except Exception:
+            return None
+

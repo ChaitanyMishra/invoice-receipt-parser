@@ -1,8 +1,9 @@
-from curses.ascii import HT
+import io
+from openpyxl import Workbook
+from fastapi.responses import StreamingResponse
 import json
 import os
 import re
-import stat
 import uuid
 
 import redis
@@ -11,10 +12,10 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
-from requests import status_codes
 from sqlmodel import SQLModel
+from tomlkit import ws
+from crud_invoice import get_invoice_by_id
 
-from app.models import User
 from app.auth import (
     create_access_token,
     decode_access_token,
@@ -22,12 +23,12 @@ from app.auth import (
     verify_hash_password,
 )
 from app.database import engine
+from app.models import User
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
 from app.tasks import process_file
 from crud_batch import create_batch
 from crud_invoice import create_invoice
-from crud_user import create_user, get_user_by_email
 from crud_uploaded_file import (
     create_uploaded_file,
     delete_file,
@@ -35,6 +36,7 @@ from crud_uploaded_file import (
     get_file_by_id,
     update_extracted_text,
 )
+from crud_user import create_user, get_user_by_email
 
 load_dotenv()
 
@@ -130,7 +132,7 @@ def get_documents(current_user: User = Depends(get_current_user)):
     file_list = [f.model_dump() for f in db_files]
     redis_client.set(cache_key, json.dumps(file_list, default=str), ex=60)
 
-    return db_files
+    return file_list
 
 
 @app.get("/files/{file_id}")
@@ -161,10 +163,11 @@ def del_file(file_id: int, current_user:User=Depends(get_current_user)):
 @app.post("/files/{file_id}/extract")
 def extract_file(file_id: int , current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
+    if not file:
+            raise HTTPException(status_code=404, detail="file not found")
     if file.user_id != current_user.id:
         raise HTTPException(status_code=403,detail="Not Authorized")
-    if not file:
-        raise HTTPException(status_code=404, detail="file not found")
+
 
     extracted_text = extract_text_from_pdf(file.filepath)
     if not extracted_text:
@@ -187,14 +190,12 @@ def extract_file(file_id: int , current_user:User=Depends(get_current_user)):
 @app.post("/files/{file_id}/parse")
 def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
-    if file.user_id != current_user.id:
-        raise HTTPException(status_code=403,detail='Not Authorized')
     if not file:
-        raise HTTPException(status_code=404, detail="File or extracted text not found")
+            raise HTTPException(status_code=404, detail="File or extracted text not found")
     if file.user_id != current_user.id:
         raise HTTPException(status_code=403,detail='Not Authorized')
     if not file.extracted_text:
-        raise HTTPException(status_code=404, detail="File or extracted text not found")
+        raise HTTPException(status_code=404, detail="Extracted text not found")
 
     if not invoice_count(file.extracted_text):
         raise HTTPException(
@@ -257,7 +258,8 @@ def register_user(user_data: UserRegister):
     hashed_password = get_password_hash(user_data.password)
 
     new_user = create_user(user_data.email, hashed_password)  # type: ignore
-    return {"message": "registration successful!", "user_id": new_user.id}
+    if new_user:
+        return {"message": "registration successful!", "user_id": new_user.id}
 
 
 @app.post("/login")
@@ -273,5 +275,31 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token({"email": existing_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
+@app.get('/invoices/export')
+def export_invoice(current_user:User=Depends(get_current_user)):
+    invoices = get_invoice_by_id(current_user.id)
+    if not invoices:
+        raise HTTPException(status_code=404,detail='No invoice Found')
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Invoices'
+    ws.append(["Invoice ID", "Vendor", "Invoice Number", "GSTIN" ,  "Address" , "Date", "Total", "Tax", "Status"])
 
+    for inv in invoices:
+        ws.append([
+            inv.id,
+            inv.vendor_name or  "",
+            inv.invoice_number or "",
+            inv.gstin or "",
+            inv.address or "",
+            inv.date or "",
+            inv.total or 0.0,
+            inv.tax_amount or 0.0,
+            inv.status
+        ])
+    buffer  = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    return StreamingResponse(buffer,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition": 'attachment; filename="invoices_export.xlsx"'})
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
