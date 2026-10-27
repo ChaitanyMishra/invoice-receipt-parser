@@ -279,8 +279,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 @app.get('/invoices/export')
 def export_invoice(current_user:User=Depends(get_current_user)):
     invoices = get_invoice_by_id(current_user.id)
-    if not invoices:
-        raise HTTPException(status_code=404,detail='No invoice Found')
     wb = Workbook()
     ws = wb.active
     ws.title = 'Invoices'
