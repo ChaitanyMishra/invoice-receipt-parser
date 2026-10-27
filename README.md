@@ -299,7 +299,7 @@ erDiagram
 
     USER {
         int id PK
-        string email
+        string email UK
         string hashed_password
         datetime created_at
     }
@@ -308,14 +308,19 @@ erDiagram
         int user_id FK
         int batch_id FK
         string filename
+        int size
         string filepath
+        string extracted_text
         string status
+        datetime uploaded_at
     }
     BATCH {
         int id PK
         int total_files
         int completed_files
+        int failed_files
         string status
+        datetime created_at
     }
     INVOICE {
         int id PK
@@ -323,18 +328,40 @@ erDiagram
         string status
         string vendor_name
         string gstin
-        float total
+        string address
+        string invoice_number
+        string order_number
+        date date
+        float subtotal
         float tax_amount
+        float total
+        datetime created_at
     }
     LINEITEM {
         int id PK
         int invoice_id FK
         string description
+        float quantity
+        float unit_price
         float amount
     }
 ```
 
----
+**Relationships**
+
+- A `User` owns many `UploadedFile` records, and every query is scoped by `user_id`.
+- A `Batch` groups many `UploadedFile` records. `batch_id` is `NULL` for single uploads.
+- An `UploadedFile` produces at most one `Invoice`. Re-parsing updates the existing row.
+- An `Invoice` has many `LineItem` rows.
+
+**Status values**
+
+| Table | Values |
+|---|---|
+| `UploadedFile.status` | `pending`, `processing`, `completed`, `failed` |
+| `Batch.status` | `pending`, `processing`, `completed`, `partial`, `failed` |
+
+Schema changes are managed with Alembic (`alembic upgrade head`).
 
 ## Project Structure
 
