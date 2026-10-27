@@ -1,12 +1,11 @@
-from decimal import Decimal, InvalidOperation
 import re
+from decimal import Decimal, InvalidOperation
 
 from app.services.llm_extractor import (
     extract_invoice_data_gemini,
     extract_invoice_data_groq,
 )
 from crud_invoice import parse_date
-
 
 MONEY_FIELDS = {"total", "tax_amount", "subtotal"}
 AMOUNT_TOKEN = re.compile(
@@ -58,7 +57,9 @@ def validate_field(field: str, value):
             return False
     if field == "gstin":
         return bool(
-            re.fullmatch(r"\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]", str(value).upper())
+            re.fullmatch(
+                r"\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]", str(value).upper()
+            )
         )
     if field == "invoice_number":
         bad = {"dated", "no", "bill", "invoice", "number"}
@@ -67,7 +68,7 @@ def validate_field(field: str, value):
 
 
 def _line_amounts(line: str):
-    line = re.sub(r"\(\s*cid\s*:\s*\d+\s*\)", " ", line, flags=re.I)
+    line = re.sub(r"\(\s*cid\s*:\s*\d+\s*\)", " ", line, flags=re.IGNORECASE)
     return [parse_amount(value) for value in AMOUNT_TOKEN.findall(line)]
 
 
@@ -75,39 +76,42 @@ def extract_total(text: str):
     candidates = []
     lines = text.splitlines()
     excluded = re.compile(
-        r"\b(?:sub[\s-]?total|taxable|cgst|sgst|igst|quantity|qty)\b", re.I
+        r"\b(?:sub[\s-]?total|taxable|cgst|sgst|igst|quantity|qty)\b", re.IGNORECASE
     )
     tax_total = re.compile(
-        r"\b(?:total\s+(?:tax|gst|vat)|(?:tax|gst|vat)\s+total)\b", re.I
+        r"\b(?:total\s+(?:tax|gst|vat)|(?:tax|gst|vat)\s+total)\b", re.IGNORECASE
     )
     labels = (
         (
             5,
             re.compile(
                 r"\b(?:grand\s+total|total\s+invoice\s+value|total\s+payable|net\s+payable)\b",
-                re.I,
+                re.IGNORECASE,
             ),
         ),
         (
             4,
             re.compile(
                 r"\b(?:invoice\s+total|total\s+amount|invoice\s+amount|total\s+due|amount\s+due|amount\s+payable|invoice\s+value)\b",
-                re.I,
+                re.IGNORECASE,
             ),
         ),
-        (2, re.compile(r"\btotal\b", re.I)),
+        (2, re.compile(r"\btotal\b", re.IGNORECASE)),
     )
 
     for index, line in enumerate(lines):
         if excluded.search(line) or tax_total.search(line):
             continue
-        strength = next((rank for rank, pattern in labels if pattern.search(line)), None)
+        strength = next(
+            (rank for rank, pattern in labels if pattern.search(line)), None
+        )
         if strength is None:
             continue
         values = _line_amounts(line)
-        if re.match(r"\s*total\s*:", line, re.I) and len(
-            [value for value in values if value is not None]
-        ) > 1:
+        if (
+            re.match(r"\s*total\s*:", line, re.IGNORECASE)
+            and len([value for value in values if value is not None]) > 1
+        ):
             continue
         if not values and index + 1 < len(lines):
             values = _line_amounts(lines[index + 1])
@@ -124,19 +128,25 @@ def extract_tax(text: str):
     explicit = []
     components = []
     for line in text.splitlines():
-        if re.search(r"\btaxable\b", line, re.I):
+        if re.search(r"\btaxable\b", line, re.IGNORECASE):
             continue
         values = [value for value in _line_amounts(line) if value is not None]
         if not values:
             continue
-        if re.search(r"\b(?:total\s+tax|tax\s+amount)\b", line, re.I):
+        if re.search(r"\b(?:total\s+tax|tax\s+amount)\b", line, re.IGNORECASE):
             explicit.append(values[-1])
-        elif re.search(r"\btotal\b", line, re.I) and len(values) >= 2:
+        elif re.search(r"\btotal\b", line, re.IGNORECASE) and len(values) >= 2:
             explicit.append(values[-2])
-        elif re.search(r"\b(?:cgst|sgst|igst|vat)\b", line, re.I):
+        elif re.search(r"\b(?:cgst|sgst|igst|vat)\b", line, re.IGNORECASE):
             components.append(values[-1])
 
-    tax = explicit[-1] if explicit else sum(components, Decimal("0")) if components else None
+    tax = (
+        explicit[-1]
+        if explicit
+        else sum(components, Decimal(0))
+        if components
+        else None
+    )
     return str(tax) if tax is not None else None
 
 
@@ -189,7 +199,7 @@ def cross_validation(parsed: dict):
                 for item in line_items
                 if parse_amount(item.get("amount")) is not None
             ),
-            Decimal("0"),
+            Decimal(0),
         )
         if item_total and abs(item_total - subtotal) > Decimal("1.00"):
             warnings.append("Line-item amounts do not match the taxable subtotal.")
@@ -198,39 +208,41 @@ def cross_validation(parsed: dict):
 
 
 FIELD_PATTERNS = {
-"invoice_number": [
-    r"Invoice Number\s*:\s*(\S+)",
-    r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",
-    r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",
-    r"Bill No\.?\s*:?\s*(\S+)",
-],
-        "date": [
-            r"Invoice Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
-            r"Dated\s*:?\s*(\d{2}-[A-Za-z]{3}-\d{2,4})",
-            r"Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
-        ],
-        "gstin": [
-            r"GST Registration No\s*:\s*(\S+)",
-            r"GSTIN/UIN\s*:\s*([\dA-Z]+)",
-            r"GSTIN\s*:\s*([\dA-Z]+)",
-        ],
-        "order_number": [
-            r"Order Number\s*:\s*(\S+)",
-            r"Reference No\.?\s*&?\s*Date\.?\s*:?\s*(\S+/[\d/-]+)",
-        ],
-        "total": [
-            r"Grand Total\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
-        ],
-        "tax_amount": [
-            r"Tax Amount\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
-        ],
-        "subtotal": [
-            r"(?:Taxable Value|Sub[\s-]?Total)\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
-        ],
-    }
-def extract_field(field:str , text:str):
+    "invoice_number": [
+        r"Invoice Number\s*:\s*(\S+)",
+        r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",
+        r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",
+        r"Bill No\.?\s*:?\s*(\S+)",
+    ],
+    "date": [
+        r"Invoice Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
+        r"Dated\s*:?\s*(\d{2}-[A-Za-z]{3}-\d{2,4})",
+        r"Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
+    ],
+    "gstin": [
+        r"GST Registration No\s*:\s*(\S+)",
+        r"GSTIN/UIN\s*:\s*([\dA-Z]+)",
+        r"GSTIN\s*:\s*([\dA-Z]+)",
+    ],
+    "order_number": [
+        r"Order Number\s*:\s*(\S+)",
+        r"Reference No\.?\s*&?\s*Date\.?\s*:?\s*(\S+/[\d/-]+)",
+    ],
+    "total": [
+        r"Grand Total\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
+    ],
+    "tax_amount": [
+        r"Tax Amount\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
+    ],
+    "subtotal": [
+        r"(?:Taxable Value|Sub[\s-]?Total)\s*:?\s*₹?\s*([\d,]+(?:\.\d{1,2})?)",
+    ],
+}
+
+
+def extract_field(field: str, text: str):
     for pattern in FIELD_PATTERNS[field]:
-        match = re.search(pattern , text ,re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(1)
     return None
@@ -243,8 +255,10 @@ def parse_invoice_text(text: str, use_llm: bool = True) -> dict:
     vendor_name = re.search(r"(?m)^For\s+(.+?)\s*:\s*$", text)
     for field in FIELD_PATTERNS:
         parsed_text[field] = (
-            extract_total(text) if field == "total"
-            else extract_tax(text) if field == "tax_amount"
+            extract_total(text)
+            if field == "total"
+            else extract_tax(text)
+            if field == "tax_amount"
             else extract_field(field, text)
         )
         if parsed_text[field] is not None and not validate_field(
@@ -268,13 +282,13 @@ def parse_invoice_text(text: str, use_llm: bool = True) -> dict:
         try:
             llm_result = extract_invoice_data_groq(text, missing_field)
         except Exception as e:
-            # Log it, but don't crash
             print(f"Groq failed: {e}")
     if use_llm and not llm_result:
         try:
             llm_result = extract_invoice_data_gemini(text, missing_field)
         except Exception as e:
             print(f"Gemini failed: {e}")
+
     llm_fields = llm_result.get("fields", llm_result)
     if isinstance(llm_fields, dict):
         for field in missing_field:
@@ -287,6 +301,7 @@ def parse_invoice_text(text: str, use_llm: bool = True) -> dict:
     line_items = llm_result.get("line_items", []) if use_llm else []
     if not isinstance(line_items, list):
         line_items = []
+
     parsed_text["line_items"] = [
         {
             "description": str(item["description"]).strip(),
