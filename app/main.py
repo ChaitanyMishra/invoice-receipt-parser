@@ -6,6 +6,12 @@ import json
 import os
 import re
 import uuid
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 import redis
 from dotenv import load_dotenv
@@ -83,7 +89,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
     user_mail = valid_user.get("email")
     user = get_user_by_email(user_mail)
     if not user:
+        logger.warning(f"Failed log in attempt for token")
         raise HTTPException(status_code=401, detail="user not exists")
+
     return user
 
 
@@ -114,7 +122,7 @@ async def upload_file(
         filepath=filepath,
         user_id=current_user.id
     )
-    # FIX: Clear only this user's cache
+    logger.info(f"User {current_user.id} uploaded {filename}")
     redis_client.delete(f"my_files:user:{current_user.id}")
     return {"id": record.id, "filename": filename, "size": len(read_file)}
 
@@ -124,11 +132,9 @@ def get_documents(current_user: User = Depends(get_current_user)):
     cache_key = f"my_files:user:{current_user.id}"
     redis_cache = redis_client.get(cache_key)
     if redis_cache:
-        print("CACHE HIT")
+        logger.info("CACHE HIT")
         return json.loads(redis_cache)
-
-    print("CACHE MISS")
-
+    logger.info("CACHE MISS")
     db_files = files(user_id=current_user.id)
     file_list = [f.model_dump() for f in db_files]
     redis_client.set(cache_key, json.dumps(file_list, default=str), ex=60)
@@ -202,6 +208,7 @@ def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
         raise HTTPException(
             status_code=400, detail="pdf contains more than 1 invoice"
         )
+    logger.info(f"Parsing file {file_id} for user {current_user.id}")
     parsed_dict = parse_invoice_text(file.extracted_text)
     if not parsed_dict:
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
