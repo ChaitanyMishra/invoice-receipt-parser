@@ -96,3 +96,4 @@ websockets==16.1.1
 email-validator
 pytest
 httpx
+alembic

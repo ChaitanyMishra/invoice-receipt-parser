@@ -58,6 +58,6 @@ class Batch(SQLModel,table=True):
     status:str  # Values: "pending", "processing", "completed", "partial", "failed"
 class User(SQLModel,table=True):
     id:int |None=Field(default=None,primary_key=True)
-    email:str=Field(unique=True)
+    email:str=Field(index=True ,unique=True)
     hashed_password:str=Field(min_length=8)
     created_at:datetime.datetime=Field(default_factory=datetime.datetime.now)
