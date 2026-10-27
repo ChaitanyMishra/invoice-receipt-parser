@@ -1,9 +1,7 @@
-# Invoice Parser
-=======
-
 # Invoice Parser API
-**Live Demo:** [https://invoice-web-hw3q.onrender.com](https://invoice-web-hw3q.onrender.com)
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+
+**Live Demo:** https://invoice-web-hw3q.onrender.com
+*(Hosted on a free tier. The first request after inactivity can take 30–60 seconds while the service wakes up.)*
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -12,16 +10,9 @@
 ![Celery](https://img.shields.io/badge/Celery-37814A?logo=celery&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
-
-**Live Demo:** https://invoice-web-hw3q.onrender.com
-*(Hosted on a free tier. The first request after inactivity can take 30–60 seconds while the service wakes up.)*
-
 A backend service that turns uploaded invoices and receipts into structured data.
 
-It uses **multi-pattern regex** for speed and zero cost, **validates** the output, and falls back to **LLMs (Groq → Gemini)** only for the fields regex cannot reliably extract. Batch uploads are processed asynchronously with **Celery + Redis**. If every LLM provider fails, the pipeline still returns the regex results instead of crashing.
-=======
-A service for uploading invoices and reviewing extracted data. It uses labeled-text regex first, validates monetary values and arithmetic, and uses Groq/Gemini only for fields that need contextual extraction. Multi-file uploads stay pending until parsing is requested; the API limits parsing to three files per minute.
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+It uses **labeled-text regex** first for speed and zero cost, **validates** monetary values and arithmetic, and calls **LLMs (Groq → Gemini)** only for fields that need contextual extraction. Multi-file uploads stay *pending* until parsing is requested, and the API limits parsing to three files per minute. If every LLM provider fails, the pipeline still returns the regex results instead of crashing.
 
 ---
 
@@ -50,36 +41,23 @@ A service for uploading invoices and reviewing extracted data. It uses labeled-t
 
 - **Indian GST focus:** optimized for Indian GST invoices (GSTIN, tax extraction), with best-effort fallback for other formats.
 - **File upload:** PDF, JPG, and PNG support (single or batch), with metadata stored in PostgreSQL.
-- **Text extraction:** native text extraction from PDFs using `pdfplumber`.
-- **Multi-pattern regex parsing:** instant extraction of 6 standard fields with high accuracy on structured GST invoices.
-- **Validation layer:** enforces format constraints and cross-field rules to catch regex false positives.
-- **Hybrid parsing engine:** regex first (fast, zero cost); LLMs are invoked only for complex or missing fields.
+- **Text extraction:** native text extraction from text-based PDFs using `pdfplumber`.
+- **Regex-first parsing:** multi-pattern extraction of 7 standard fields, with normalized money values.
+- **Validation layer:** checks amount formats, line arithmetic, and subtotal/tax/total consistency; suspect invoices are marked for manual review.
+- **Hybrid parsing engine:** regex first (fast, free); LLMs are invoked only for missing or context-dependent fields.
 - **Multi-provider LLM fallback:** Groq is the primary provider, with automatic fallback to Gemini on rate limits or errors.
-- **Async batch processing:** background processing through Celery workers and Redis.
+- **On-demand parsing:** batch uploads stay pending until you request parsing; parsing is limited to three files per minute across the app.
+- **Background task infrastructure:** Celery workers and Redis.
 - **Retry logic:** exponential backoff for transient errors.
 - **Idempotent writes:** re-parsing updates the existing invoice record instead of creating duplicates.
-- **Graceful degradation:** falls back to partial regex results if all LLM providers are unavailable.
+- **Graceful degradation:** an LLM failure never breaks the pipeline; partial regex results are kept.
 - **JWT authentication:** secure login with strict per-user data isolation.
 - **Excel export:** export parsed invoices to `.xlsx` using `openpyxl`.
 - **Database migrations:** schema changes managed with Alembic.
-- **Automated tests:** Pytest suite covering authentication, file handling, and security boundaries.
+- **Automated tests:** Pytest suite covering authentication, file handling, security boundaries, and parser validation.
 - **Structured logging:** standard Python logging configured for terminal output.
-- **Basic frontend:** simple UI for uploading files, managing auth, and viewing extraction status.
+- **Frontend workspace:** separate file and invoice lists, visible status badges, and contact details.
 - **Interactive API docs:** auto-generated Swagger UI at `/docs`.
-=======
-- **File upload** for PDF, JPG and PNG, single or batch, with metadata stored in PostgreSQL
-- **Text extraction** from text-based PDFs using `pdfplumber`
-- **Regex-first invoice parsing** with normalized money values and LLM fallback for missing fields
-- **Validation layer:** checks amount formats, line arithmetic, and subtotal/tax/total consistency; suspect invoices are marked for manual review
-- **Hybrid parsing:** regex first (fast, free), LLM only for missing fields
-- **Multi-provider LLM fallback:** Groq (primary), then Gemini
-- **On-demand parsing** limited to three files per minute across the app
-- **Retry with exponential backoff** for transient failures
-- **Idempotent writes:** re-parsing updates the existing invoice instead of creating duplicates
-- **Graceful degradation:** an LLM failure never breaks the pipeline
-- **Frontend workspace** with separate file and invoice lists, visible status badges, and contact details
-- **Interactive API docs** auto-generated by FastAPI at `/docs`
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
 
 ---
 
@@ -91,7 +69,7 @@ A service for uploading invoices and reviewing extracted data. It uses labeled-t
 flowchart TD
     A["Client uploads file<br/>POST /files"] --> B["Save to disk + UploadedFile row"]
     B --> C["POST /files/{id}/extract<br/>pdfplumber → extracted_text"]
-    C --> D["POST /files/{id}/parse<br/>Regex extraction (6 fields)"]
+    C --> D["POST /files/{id}/parse<br/>Regex extraction (7 fields)"]
     D --> V["Validate<br/>format + cross-field"]
     V --> E{"Any fields<br/>still missing?"}
     E -- No --> H["Create / update Invoice row"]
@@ -104,10 +82,7 @@ flowchart TD
     H --> J["Return parsed data"]
 ```
 
-### Async Batch Flow
-=======
-### Multi-file flow
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+### Multi-File Flow
 
 ```mermaid
 flowchart TD
@@ -126,39 +101,26 @@ flowchart TD
 | Field | Strategy | Notes |
 |---|---|---|
 | `invoice_number` | Regex | Multi-pattern, first match wins |
-| `date` | Regex | Multi-format date parsing |
-| `gstin` | Regex | Validated against Indian GSTIN format rules |
-| `order_number` | Regex | Matched via Reference / Order labels |
-| `total` | Regex | Multi-pattern match for invoice total |
-| `tax_amount` | Regex | Extracted from IGST / CGST / SGST breakdowns |
+| `date` | Regex | Multiple formats (`parse_date` normalizes) |
+| `gstin` | Regex | Via GSTIN/UIN label; validated against Indian GSTIN format rules |
+| `order_number` | Regex | Order / Reference No. labels |
+| `total` | Regex | Amazon and sample-invoice formats |
+| `tax_amount` | Regex | IGST / CGST / SGST labels |
+| `subtotal` | Regex | Taxable value / subtotal labels |
 | `vendor_name` | LLM only | Complex, unstructured field |
 | `address` | LLM only | Complex, unstructured field |
 | `line_items` | LLM only | Multi-line table structure extraction |
 
-**Regex-only parse time:** ~0.001 s per invoice.
-=======
-| Field | Regex? | Notes |
-|-------|--------|-------|
-| `invoice_number` | ✅ | Multi-pattern, first-match |
-| `date` | ✅ | Multiple formats (`parse_date` converts) |
-| `gstin` | ✅ | Via GSTIN/UIN label |
-| `order_number` | ✅ | `Reference No.` fallback |
-| `total` | ✅ | Amazon + Sample Invoices formats |
-| `tax_amount` | ✅ | IGST / CGST / SGST labels |
-| `subtotal` | ✅ | Taxable value / subtotal labels |
-| `vendor_name` | ❌ | LLM only |
-| `address` | ❌ | LLM only |
-| `line_items` | ❌ | LLM only (table extraction) |
-
 | Stage | Responsibility | Fields |
-|-------|----------------|--------|
+|---|---|---|
 | Regex | Fast, free, deterministic | `invoice_number`, `date`, `gstin`, `order_number`, `total`, `tax_amount`, `subtotal` |
-| Validation | Rejects malformed numeric values | Amount format, arithmetic, and cross-field checks |
+| Validation | Rejects malformed values | Amount format, arithmetic, and cross-field checks |
 | LLM fallback | Context-dependent text and tables | `vendor_name`, `address`, `line_items` |
 | Review status | Flagged for manual verification | Missing or inconsistent invoice amounts |
 
+**Regex-only parse time:** ~0.001 s per invoice.
+
 Extracted amounts should still be checked against the source invoice. Inconsistent or unverified totals are marked for review; parsing does not guarantee tax compliance or accounting accuracy.
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
 
 ---
 
@@ -171,14 +133,8 @@ Extracted amounts should still be checked against the source invoice. Inconsiste
 | ORM | SQLModel (SQLAlchemy + Pydantic) |
 | Database | PostgreSQL (Alembic migrations) |
 | PDF extraction | pdfplumber |
-| Async queue | Celery 5.6 |
-| Broker | Redis |
-=======
-| Database | PostgreSQL |
-| PDF parsing | pdfplumber |
-| Background task infrastructure | Celery 5.6 |
-| Cache and rate limits | Redis |
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+| Background tasks | Celery 5.6 |
+| Cache, broker and rate limits | Redis |
 | LLM providers | Groq (`openai/gpt-oss-20b`), Google Gemini (`gemini-3.5-flash-lite`) |
 | Excel export | openpyxl |
 | Testing | Pytest + HTTPX |
@@ -268,13 +224,11 @@ SECRET_KEY=your_super_secret_jwt_key
 | Variable | Purpose |
 |---|---|
 | `DB_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis URL used as the Celery broker |
+| `REDIS_URL` | Redis URL used for Celery and rate limiting |
 | `GROQ_API_KEY` | Primary LLM provider key |
 | `GEMINI_API_KEY` | Fallback LLM provider key |
 | `SECRET_KEY` | Secret used to sign JWT tokens |
 
-=======
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
 ---
 
 ## API Reference
@@ -286,32 +240,17 @@ SECRET_KEY=your_super_secret_jwt_key
 | `GET` | `/health` | Health check | No |
 | `GET` | `/` | Web user interface | No |
 | `POST` | `/files` | Upload a single file (PDF / JPG / PNG) | Yes |
-| `POST` | `/batch-upload` | Upload multiple files for async processing | Yes |
+| `POST` | `/batch-upload` | Upload multiple files as pending | Yes |
 | `GET` | `/get_upload_data` | List all files uploaded by the authenticated user | Yes |
 | `GET` | `/files/{id}` | Get metadata for a specific uploaded file | Yes |
-| `POST` | `/files/{id}/extract` | Extract raw text from an uploaded file (PDF) | Yes |
-| `POST` | `/files/{id}/parse` | Parse extracted text into a structured Invoice record | Yes |
+| `POST` | `/files/{id}/extract` | Extract raw text from an uploaded file (PDF only) | Yes |
+| `POST` | `/files/{id}/parse` | Parse text and create or update the Invoice row | Yes |
 | `DELETE` | `/files/{id}` | Delete the file from disk and its database record | Yes |
 | `GET` | `/invoices/export` | Download parsed invoice data as an Excel file | Yes |
 
-Full interactive documentation is available at `/docs` (Swagger UI).
-=======
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/` | Frontend UI |
-| `POST` | `/files` | Upload a single file (PDF / JPG / PNG) |
-| `POST` | `/batch-upload` | Upload multiple files as pending |
-| `GET` | `/get_upload_data` | List all uploaded files |
-| `GET` | `/files/{id}` | Get one file's metadata |
-| `POST` | `/files/{id}/extract` | Extract text from the file (PDF only) |
-| `POST` | `/files/{id}/parse` | Parse text and create or update the Invoice row |
-| `DELETE` | `/files/{id}` | Delete the file from disk and database |
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+`/files/{id}/parse` is limited to three files per minute across all users. The UI's **Parse All Pending** button extracts and processes at most three files per click; additional files wait for a later click and rate-limit window.
 
-`/files/{id}/parse` is limited to three files per minute across all users. The UI's
-**Parse All Pending** button extracts and processes at most three files per click;
-additional files wait for a later click and rate-limit window.
+Full interactive documentation is available at `/docs` (Swagger UI).
 
 ---
 
@@ -326,22 +265,6 @@ curl -X POST http://127.0.0.1:8000/login \
 
 ```json
 {"access_token": "eyJhb...", "token_type": "bearer"}
-=======
-{
-  "status": "parsed",
-  "invoice_id": 1,
-  "parsed_data": {
-    "invoice_number": "POD-XX-241475XXX",
-    "date": "28.12.2025",
-    "gstin": "29XXXXX3918X1XX",
-    "order_number": "406-6548532-XXXXXXX",
-    "total": "19491.53",
-    "tax_amount": "3508.47",
-    "vendor_name": "Amazon Seller Services Private Limited",
-    "address": "#26/1, Brigade Gateway, ..."
-  }
-}
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
 ```
 
 **2. Upload an invoice**
@@ -363,22 +286,42 @@ curl -X POST http://127.0.0.1:8000/files/1/extract -H "Authorization: Bearer YOU
 curl -X POST http://127.0.0.1:8000/files/1/parse   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-**4. Export everything to Excel**
+```json
+{
+  "status": "parsed",
+  "invoice_id": 1,
+  "parsed_data": {
+    "invoice_number": "POD-XX-241475XXX",
+    "date": "28.12.2025",
+    "gstin": "29XXXXX3918X1XX",
+    "order_number": "406-6548532-XXXXXXX",
+    "total": "19491.53",
+    "tax_amount": "3508.47",
+    "vendor_name": "Amazon Seller Services Private Limited",
+    "address": "#26/1, Brigade Gateway, ..."
+  }
+}
+```
+
+**4. Batch upload (files stay pending until you parse them)**
 
 ```bash
-curl -X GET http://127.0.0.1:8000/invoices/export \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -o invoices.xlsx
-```
-=======
 curl -X POST http://127.0.0.1:8000/batch-upload \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -F "files=@invoice-1.pdf" \
   -F "files=@invoice-2.pdf"
 # → {"total_files": 2, "status": "uploaded"}
 ```
 
 The files remain pending until you start parsing them in the frontend.
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+
+**5. Export everything to Excel**
+
+```bash
+curl -X GET http://127.0.0.1:8000/invoices/export \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o invoices.xlsx
+```
 
 ---
 
@@ -457,6 +400,8 @@ erDiagram
 
 Schema changes are managed with Alembic (`alembic upgrade head`).
 
+---
+
 ## Project Structure
 
 ```text
@@ -483,7 +428,8 @@ Schema changes are managed with Alembic (`alembic upgrade head`).
 │   └── versions/
 ├── scripts/                   # Performance testing and benchmarking utilities
 ├── tests/                     # Integration and unit tests
-│   └── test_main.py
+│   ├── test_main.py
+│   └── test_invoice_parser.py
 ├── uploads/                   # Local file storage (gitignored)
 ├── alembic.ini                # Migration configuration
 ├── docker-compose.yml         # Container orchestration
@@ -497,29 +443,16 @@ Schema changes are managed with Alembic (`alembic upgrade head`).
 
 ## Design Decisions
 
-- **Regex-first processing:** pattern matching runs in about 1 ms at zero API cost. High-confidence labeled fields (invoice number, date, GSTIN, totals) are resolved with regex, and LLMs are reserved for complex structures such as vendor details and line items.
-- **Validation engine:** regex output is checked against strict type rules and cross-field logic (for example, `tax_amount <= total`) to remove false positives before any LLM fallback.
-- **Hierarchical LLM fallback:** Groq is the fast primary provider. On HTTP 429 (rate limit) or 503 errors, execution moves to Gemini. If both fail, regex results are kept.
-- **Asynchronous task queue:** batch uploads are handed to Celery workers through Redis, and the API returns a `batch_id` immediately so request threads are never blocked.
-- **Multi-tenant security model:** file access, invoice reads, exports, and deletes are all scoped to the authenticated `user_id`.
-- **Idempotent writes:** re-parsing a file updates the existing invoice, so retries and re-runs never create duplicates.
----
-=======
-Regex avoids provider calls for fields it can identify from labeled text. Extraction accuracy depends on document text quality and invoice layout; arithmetic checks flag suspicious results but do not replace manual verification.
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+### Regex first, LLM second
+Pattern matching runs in about 1 ms at zero API cost. High-confidence labeled fields (invoice number, date, GSTIN, totals) are resolved with regex, and LLMs are reserved for complex structures such as vendor details and line items. Extraction accuracy depends on document text quality and invoice layout.
 
-## Testing
+### Validation engine
+Regex output is checked before any LLM fallback:
 
-```bash
-pytest tests/test_main.py -v
-```
-
-The suite covers authentication, file handling, and security boundaries (for example, one user cannot access another user's files).
-=======
 - **Format:** is it a number? A parseable date? A 15-character GSTIN?
-- **Cross-field:** do subtotal, tax, line items and total agree within a small rounding tolerance?
+- **Cross-field:** do subtotal, tax, line items, and total agree within a small rounding tolerance?
 
-If validation fails, the invoice remains available but is marked for manual review.
+If validation fails, the invoice remains available but is marked for manual review. Arithmetic checks flag suspicious results but do not replace manual verification.
 
 ### Why Groq primary, Gemini fallback?
 Groq's free tier has higher throughput (about 1,000 requests/day vs Gemini's ~500) and faster inference for the small model. Gemini is the safety net for when Groq rate-limits (429) or is unavailable (503). If both fail, the pipeline returns regex-only data rather than an error.
@@ -535,63 +468,53 @@ Calling `/parse` twice used to create duplicate `Invoice` rows. The save now loo
 - `/parse` is text → structured data (may call an LLM)
 
 Separating them means re-parsing does not require re-extracting, extracted text is cached in the database, and a failure is isolated to a single stage.
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+
+### Multi-tenant security model
+File access, invoice reads, exports, and deletes are all scoped to the authenticated `user_id`.
+
+---
+
+## Testing
+
+```bash
+pytest
+```
+
+- `tests/test_main.py` covers authentication, file handling, and security boundaries (for example, one user cannot access another user's files).
+- `tests/test_invoice_parser.py` covers parser validation cases.
 
 ---
 
 ## Known Limitations
 
 - **Scope:** optimized for Indian GST invoice formats. Non-GST or international receipts rely on best-effort LLM processing.
-- **PDF type:** supports text-native PDFs only. Scanned or image-based PDFs need an OCR step (planned).
-- **One invoice per file:** each uploaded document is expected to contain a single logical invoice.
-- **LLM rate limits:** large batches can slow down when free-tier LLM rate limits are reached.
-=======
-- **Text-based PDFs only.** Scanned PDFs and images need OCR (Tesseract), which is planned.
-- **Multi-invoice PDFs:** currently only the first invoice in a PDF is parsed. Splitting by invoice number is the next feature.
-- **Vendor-specific coverage:** regex is tuned for Amazon,and Other similar formats. Unusual vendors (e.g. `rent swap`, `WEMI`) fall back entirely to the LLM and may fail on rate limits.
-- **Free-tier LLM rate limits:** Parsing is capped at three files per minute. Unusual invoices may still require manual verification.
-- **No authentication.** All endpoints are currently open.
-- **Automated tests:** parser validation cases are in `tests/test_invoice_parser.py`; run them with `pytest`.
-- **No structured logging.** Errors currently go through `print()`.
-- **No migrations.** Schema changes require `drop.py` + `create_tables.py` (data loss).
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
+- **Text-based PDFs only:** scanned PDFs and images need an OCR step (Tesseract), which is planned.
+- **One invoice per file:** only the first invoice in a PDF is parsed. Splitting multi-invoice PDFs by invoice number is the next feature.
+- **Vendor-specific coverage:** regex is tuned for Amazon and similar formats. Unusual vendors (e.g. `rent swap`, `WEMI`) fall back entirely to the LLM and may fail on rate limits.
+- **Free-tier LLM rate limits:** parsing is capped at three files per minute, and unusual invoices may still require manual verification.
 
 ---
 
 ## Roadmap
 
-- [x] File upload pipeline (single and batch)
-- [x] PDF native text extraction (pdfplumber)
-- [x] Multi-pattern regex parsing engine
-- [x] Validation layer (formats and cross-field constraints)
-- [x] LLM fallback orchestrator (Groq → Gemini)
-- [x] Line-item table parsing
-- [x] Celery + Redis background worker
-- [x] Idempotent database writes and transactions
-- [x] JWT authentication and per-user data isolation
-- [x] Excel export (openpyxl)
-- [x] Database migrations (Alembic)
-- [x] Test suite
-=======
 - [x] File upload (single + batch) with metadata storage
 - [x] PDF text extraction (pdfplumber)
-- [x] Multi-pattern regex for 6 fields
+- [x] Multi-pattern regex parsing
 - [x] Validation layer (format + cross-field)
 - [x] LLM fallback (Groq → Gemini)
 - [x] Line-item extraction via LLM
 - [x] Rate-limited on-demand parsing
 - [x] Retry with exponential backoff
 - [x] Idempotent writes (Invoice + batch counters)
-- [x] Basic frontend
-- [ ] Multi-invoice PDF splitting
-- [x] Docker + docker-compose
-- [x] Deployment (Render / Railway)
-- [x] Structured logging
-- [x] Alembic migrations
-- [x] pytest test suite
+- [x] Celery + Redis background infrastructure
 - [x] JWT authentication + per-user isolation
->>>>>>> 33ceaaa (feat: improve invoice validation and dashboard UX)
-
+- [x] Excel export (openpyxl)
+- [x] Database migrations (Alembic)
+- [x] Structured logging
+- [x] Pytest test suite
+- [x] Basic frontend
+- [x] Docker + docker-compose
+- [x] Deployment (Render)
 ---
 
 ## Author
