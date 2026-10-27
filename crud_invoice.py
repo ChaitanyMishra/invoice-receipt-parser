@@ -6,7 +6,7 @@ from app.database import engine
 from app.models import Invoice, LineItem, UploadedFile
 
 def to_float(value):
-    if not value:
+    if value is None or value == "":
         return None
     try:
         return float(str(value).replace(",", "").strip())
@@ -40,21 +40,24 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
     tax_str = parsed_data.get("tax_amount")
     total_tax = to_float(tax_str) if tax_str else None
 
-    sub_total = (
-        (total_amount - total_tax)
-        if (total_amount is not None and total_tax is not None)
-        else None
-    )
+    sub_total = to_float(parsed_data.get("subtotal"))
     line_items = parsed_data.get("line_items", [])
 
     with Session(engine) as session:
         existing = session.exec(select(Invoice).where(Invoice.uploaded_file_id == uploaded_file_id)).first()
 
         if existing:
+            existing.status = (
+                "needs_review"
+                if parsed_data.get("validation_warnings")
+                else "completed"
+            )
             if total_amount is not None:
                 existing.total = total_amount
             if total_tax is not None:
                 existing.tax_amount = total_tax
+            if sub_total is not None:
+                existing.subtotal = sub_total
             if parsed_date is not None:
                 existing.date = parsed_date
             if parsed_data.get("invoice_number"):
@@ -65,18 +68,19 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
                 existing.order_number = parsed_data["order_number"]
             if parsed_data.get("vendor_name"):
                 existing.vendor_name = parsed_data["vendor_name"]
-            if sub_total is not None:
-                existing.subtotal = sub_total
             if parsed_data.get("address"):
                 existing.address = parsed_data["address"]
 
             session.exec(delete(LineItem).where(LineItem.invoice_id == existing.id))
 
             for item in line_items:
+                amount = to_float(item.get("amount"))
+                if amount is None or not item.get("description"):
+                    continue
                 line_item = LineItem(
                     invoice_id=existing.id,
                     description=item["description"],
-                    amount=to_float(item.get("amount")),
+                    amount=amount,
                     unit_price=to_float(item.get("unit_price")),
                     quantity=to_float(item.get("quantity")),
                 )
@@ -101,7 +105,11 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
                 if parsed_data.get("vendor_name")
                 else None
             ),
-            status="completed",
+            status=(
+                "needs_review"
+                if parsed_data.get("validation_warnings")
+                else "completed"
+            ),
             subtotal=sub_total,
         )
         session.add(invoice)
@@ -109,10 +117,13 @@ def create_invoice(parsed_data: dict, uploaded_file_id: int):
         session.refresh(invoice)
 
         for item in line_items:
+            amount = to_float(item.get("amount"))
+            if amount is None or not item.get("description"):
+                continue
             items = LineItem(
                 invoice_id=invoice.id,
                 description=item["description"],
-                amount=to_float(item.get("amount")),
+                amount=amount,
                 unit_price=to_float(item.get("unit_price")),
                 quantity=to_float(item.get("quantity")),
             )
@@ -163,9 +174,13 @@ def delete_invoice(invoice_id: int):
 def get_invoice_by_id(user_id:int):
     with Session(engine) as session:
         try:
-            statement = select(Invoice).join(UploadedFile).where(UploadedFile.user_id == user_id)
+            statement = (
+                select(Invoice)
+                .join(UploadedFile)
+                .where(UploadedFile.user_id == user_id)
+                .order_by(UploadedFile.id)
+            )
             result = session.exec(statement).all()
             return result
         except Exception:
             return None
-

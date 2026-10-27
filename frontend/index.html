@@ -3,23 +3,34 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10233f">
     <title>Invoice &amp; Receipt Parser</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="app.js" defer></script>
+    <link rel="stylesheet" href="style.css?v=20261027-5">
+    <script src="app.js?v=20261027-5" defer></script>
   </head>
   <body>
     <main class="page">
       <header class="page-header">
-        <h1>Invoice &amp; Receipt Parser</h1>
-        <p>Upload documents, extract their text, and review parsed invoice details.</p>
+        <a class="brand" href="#" aria-label="Invoice Desk home">
+          <span class="brand-mark" aria-hidden="true">ID</span>
+          <span>Invoice Desk</span>
+        </a>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">GST invoice workspace</p>
+            <h1>Invoices, organized.</h1>
+            <p>Upload, review and keep your invoice records in one place.</p>
+          </div>
+        </div>
       </header>
 
       <p id="error-message" class="error-message" role="alert" hidden></p>
       <p id="loading-message" class="loading-message" aria-live="polite" hidden>Loading...</p>
 
       <section id="auth-section" class="panel auth-panel" aria-labelledby="auth-heading">
-        <h2 id="auth-heading">Log in</h2>
-        <!-- FIX: Added onsubmit="return false;" to prevent URL leakage -->
+        <p class="eyebrow">Welcome to Invoice Desk</p>
+        <h2 id="auth-heading">Log in to your account</h2>
+        <p class="auth-description">Your invoice workspace is private to your account.</p>
         <form id="login-form" class="auth-form" onsubmit="return false;">
           <label for="login-username">Email</label>
           <input id="login-username" name="username" type="email" autocomplete="username" required>
@@ -27,61 +38,105 @@
           <input id="login-password" name="password" type="password" autocomplete="current-password" required>
           <button type="submit">Log in</button>
         </form>
-        <!-- FIX: Added onsubmit="return false;" to prevent URL leakage -->
         <form id="register-form" class="auth-form hidden" onsubmit="return false;">
           <label for="register-username">Email</label>
           <input id="register-username" name="username" type="email" autocomplete="username" required>
           <label for="register-password">Password</label>
-          <input id="register-password" name="password" type="password" autocomplete="new-password" required>
+          <input id="register-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+          <span class="field-help">Use at least 8 characters.</span>
           <button type="submit">Register</button>
         </form>
         <button id="auth-toggle" class="secondary-button auth-toggle" type="button">Need an account? Register</button>
       </section>
 
       <div id="main-app" class="hidden">
-        <section class="panel" aria-labelledby="upload-heading">
-          <div class="upload-heading">
-            <h2 id="upload-heading">Upload files</h2>
-            <button id="logout-button" class="secondary-button" type="button">Logout</button>
-          </div>
-          <div class="upload-grid">
-            <!-- FIX: Added onsubmit="return false;" -->
+        <nav class="app-nav" aria-label="Your workspace">
+          <button id="files-tab" class="nav-tab active" type="button" aria-current="page">Files</button>
+          <button id="invoices-tab" class="nav-tab" type="button">My invoices</button>
+          <span class="nav-spacer"></span>
+          <button id="logout-button" class="secondary-button" type="button">Log out</button>
+        </nav>
+
+        <div id="files-page">
+          <section class="panel" aria-labelledby="upload-heading">
+            <div class="upload-heading">
+              <div>
+                <p class="eyebrow">Add documents</p>
+                <h2 id="upload-heading">Upload invoices</h2>
+              </div>
+            </div>
+            <div class="upload-grid">
             <form id="single-upload-form" class="upload-form" onsubmit="return false;">
               <label for="single-file">One PDF or image</label>
               <input id="single-file" name="file" type="file" accept=".pdf,image/jpeg,image/png" required>
               <button type="submit">Upload file</button>
             </form>
 
-            <!-- FIX: Added onsubmit="return false;" -->
             <form id="batch-upload-form" class="upload-form" onsubmit="return false;">
               <label for="batch-files">Multiple PDFs or images</label>
               <input id="batch-files" name="files" type="file" accept=".pdf,image/jpeg,image/png" multiple required>
-              <button type="submit">Upload batch</button>
+              <div class="upload-actions">
+                <button type="submit">Upload batch</button>
+                <button id="parse-all" class="secondary-button" type="button">Parse All Pending</button>
+              </div>
+              <span class="muted">Parses up to 3 pending files per minute.</span>
             </form>
-          </div>
-          <p id="batch-notice" class="muted" aria-live="polite"></p>
-        </section>
-
-        <section class="panel" aria-labelledby="files-heading">
-          <div class="section-heading">
-            <h2 id="files-heading">Uploaded files</h2>
-            <div class="section-actions">
-              <button id="download-excel" type="button">Download Excel</button>
-              <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
             </div>
+            <p id="batch-notice" class="muted" aria-live="polite"></p>
+          </section>
+
+          <section class="panel" aria-labelledby="files-heading">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Your documents</p>
+                <h2 id="files-heading">Uploaded files</h2>
+              </div>
+              <div class="section-actions">
+                <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">ID</th>
+                    <th scope="col">Filename</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="files-body">
+                  <tr><td class="empty-state" colspan="4">Loading files...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section id="invoices-page" class="panel hidden" aria-labelledby="invoices-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Your records</p>
+              <h2 id="invoices-heading">My invoices</h2>
+              <p class="muted">Parsed invoice details, ordered by file ID.</p>
+            </div>
+            <button id="download-excel" type="button">Download Excel</button>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th scope="col">ID</th>
-                  <th scope="col">Filename</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Actions</th>
+                  <th scope="col">Invoice number</th>
+                  <th scope="col">Vendor</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Total</th>
+                  <th scope="col">Validation</th>
+                  <th scope="col">Details</th>
                 </tr>
               </thead>
-              <tbody id="files-body">
-                <tr><td class="empty-state" colspan="4">Loading files...</td></tr>
+              <tbody id="invoice-list-body">
+                <tr><td class="empty-state" colspan="7">Loading invoices...</td></tr>
               </tbody>
             </table>
           </div>
@@ -92,6 +147,17 @@
           <div id="invoice-content"></div>
         </section>
       </div>
+      <footer class="site-footer">
+        <div>
+          <p class="eyebrow">About</p>
+          <p>Invoice Desk helps you organize invoice files and review extracted GST invoice details.</p>
+        </div>
+        <div>
+          <p class="eyebrow">Contact</p>
+          <a href="mailto:chaitany.mishra.tech@gmail.com">chaitany.mishra.tech@gmail.com</a>
+          <a href="tel:+919305224208">+91 93052 24208</a>
+        </div>
+      </footer>
     </main>
   </body>
 </html>

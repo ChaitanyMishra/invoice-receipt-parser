@@ -1,6 +1,7 @@
 const errorMessage = document.querySelector("#error-message");
 const loadingMessage = document.querySelector("#loading-message");
 const filesBody = document.querySelector("#files-body");
+const invoiceListBody = document.querySelector("#invoice-list-body");
 const resultSection = document.querySelector("#result-section");
 const invoiceContent = document.querySelector("#invoice-content");
 const batchNotice = document.querySelector("#batch-notice");
@@ -10,9 +11,14 @@ const loginForm = document.querySelector("#login-form");
 const registerForm = document.querySelector("#register-form");
 const authToggle = document.querySelector("#auth-toggle");
 const mainApp = document.querySelector("#main-app");
+const filesPage = document.querySelector("#files-page");
+const invoicesPage = document.querySelector("#invoices-page");
+const filesTab = document.querySelector("#files-tab");
+const invoicesTab = document.querySelector("#invoices-tab");
 
 // Global variable for the auto-refresh interval
 let pollInterval;
+let filesById = new Map();
 
 // Send all requests through one place so authentication stays consistent.
 async function api(path, options = {}) {
@@ -163,6 +169,9 @@ function renderFiles(files) {
     throw new Error("The file-list response was not an array.");
   }
 
+  files.sort((left, right) => Number(left.id) - Number(right.id));
+  filesById = new Map(files.map((file) => [String(file.id), file]));
+  renderInvoices(files);
   filesBody.replaceChildren();
   if (files.length === 0) {
     const row = document.createElement("tr");
@@ -177,21 +186,111 @@ function renderFiles(files) {
 
   files.forEach((file) => {
     const row = document.createElement("tr");
+    const hasInvoice = file.invoice !== null && typeof file.invoice === "object";
+    const status = hasInvoice
+      ? (file.invoice.status === "needs_review" ? "review" : "completed")
+      : file.status;
     addCell(row, file.id);
     addCell(row, file.filename);
-    addCell(row, file.status);
+    const statusClasses = {
+      completed: "status-green",
+      pending: "status-yellow",
+      processing: "status-yellow",
+      review: "status-yellow",
+      failed: "status-red",
+    };
+    const statusCell = addCell(row, "");
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `status-badge ${statusClasses[status] || "status-yellow"}`;
+    statusBadge.textContent = status === "review" ? "Needs review" : status;
+    statusCell.append(statusBadge);
     const actions = addCell(row, "", "actions");
     const group = document.createElement("div");
     group.className = "action-group";
-    group.append(
-      actionButton("Extract", "", () => extractFile(file.id)),
-      actionButton("Parse", "", () => parseFile(file.id)),
-      actionButton("View", "", () => viewFile(file.id)),
-      actionButton("Delete", "delete-button", () => deleteFile(file.id)),
-    );
+    group.append(actionButton("Extract", "", () => extractFile(file.id)));
+    if (!hasInvoice && status !== "processing") {
+      group.append(actionButton("Parse", "", () => parseFile(file.id)));
+    }
+    if (hasInvoice) {
+      group.append(actionButton("View", "", () => viewFile(file.id)));
+      group.append(actionButton("Re-parse", "secondary-button", () => parseFile(file.id)));
+    }
+    group.append(actionButton("Delete", "delete-button", () => deleteFile(file.id)));
     actions.append(group);
     filesBody.append(row);
   });
+}
+
+function renderInvoices(files) {
+  const invoices = files.filter(
+    (file) => file.invoice && typeof file.invoice === "object",
+  );
+  invoiceListBody.replaceChildren();
+  if (invoices.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.className = "empty-state";
+    cell.colSpan = 7;
+    cell.textContent = "No parsed invoices yet. Parse an uploaded file to see it here.";
+    row.append(cell);
+    invoiceListBody.append(row);
+    return;
+  }
+
+  invoices.forEach((file) => {
+    const invoice = file.invoice;
+    const row = document.createElement("tr");
+    addCell(row, file.id);
+    addCell(row, invoice.invoice_number);
+    addCell(row, invoice.vendor_name);
+    addCell(row, invoice.date);
+    const total = addCell(
+      row,
+      invoice.total == null
+        ? "—"
+        : `₹${Number(invoice.total).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+    );
+    total.className = "invoice-money";
+    const statusCell = addCell(row, "");
+    const needsReview = invoice.status === "needs_review";
+    const badge = document.createElement("span");
+    badge.className = `status-badge ${needsReview ? "status-yellow" : "status-green"}`;
+    badge.textContent = needsReview ? "Needs review" : "Parsed";
+    statusCell.append(badge);
+    const actionCell = addCell(row, "", "actions");
+    const actions = document.createElement("div");
+    actions.className = "action-group";
+    actions.append(
+      actionButton("View", "", () => viewFile(file.id)),
+      actionButton("Re-parse", "secondary-button", () => parseFile(file.id)),
+    );
+    actionCell.append(actions);
+    invoiceListBody.append(row);
+  });
+}
+
+function showWorkspacePage(page) {
+  const showInvoices = page === "invoices";
+  filesPage.classList.toggle("hidden", showInvoices);
+  invoicesPage.classList.toggle("hidden", !showInvoices);
+  filesTab.classList.toggle("active", !showInvoices);
+  invoicesTab.classList.toggle("active", showInvoices);
+  filesTab.toggleAttribute("aria-current", !showInvoices);
+  invoicesTab.toggleAttribute("aria-current", showInvoices);
+}
+
+function formatMoney(value) {
+  const amount = Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(amount)) {
+    return "—";
+  }
+  return `₹${amount.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 // Upload one selected file using the backend's `file` multipart field.
@@ -225,7 +324,53 @@ async function uploadBatch(event) {
   input.value = "";
   await loadFiles();
   batchNotice.textContent =
-    `Batch #${result.batch_id} queued (${result.total_files} files).`;
+    `Uploaded ${result.total_files} files. Click "Parse All Pending" to parse up to 3.`;
+}
+
+// Parse up to three unparsed files per click, one at a time.
+async function parseAllFiles() {
+  const files = await api("/get_upload_data");
+  if (!Array.isArray(files)) {
+    throw new Error("The file-list response was not an array.");
+  }
+
+  const pendingFiles = files.filter(
+    (file) =>
+      !file.invoice &&
+      file.status !== "completed" &&
+      file.status !== "processing",
+  );
+  const filesToParse = pendingFiles.slice(0, 3);
+  const failures = [];
+  for (const [index, file] of filesToParse.entries()) {
+    try {
+      if (!file.has_extracted_text) {
+        const extraction = await api(
+          `/files/${encodeURIComponent(file.id)}/extract`,
+          { method: "POST" },
+        );
+        if (extraction.status === "no_text_extracted") {
+          throw new Error(extraction.note);
+        }
+      }
+      await api(`/files/${encodeURIComponent(file.id)}/parse`, {
+        method: "POST",
+      });
+    } catch (error) {
+      failures.push(`File #${file.id}: ${error.message}`);
+    }
+
+    if (index < filesToParse.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  await loadFiles();
+  if (failures.length > 0) {
+    throw new Error(`Some files could not be parsed:\n${failures.join("\n")}`);
+  }
+  batchNotice.textContent =
+    `Parsed ${filesToParse.length} file(s). ${pendingFiles.length - filesToParse.length} remaining; the limit is 3 files per minute.`;
 }
 
 // Extract text from a single uploaded file.
@@ -243,6 +388,16 @@ async function extractFile(fileId) {
 
 // Parse an uploaded file and display the parsed invoice fields.
 async function parseFile(fileId) {
+  const file = filesById.get(String(fileId));
+  if (file && !file.has_extracted_text) {
+    const extraction = await api(
+      `/files/${encodeURIComponent(fileId)}/extract`,
+      { method: "POST" },
+    );
+    if (extraction.status === "no_text_extracted") {
+      throw new Error(extraction.note);
+    }
+  }
   const result = await api(`/files/${encodeURIComponent(fileId)}/parse`, {
     method: "POST",
   });
@@ -252,15 +407,12 @@ async function parseFile(fileId) {
 
 // Fetch an already parsed invoice from the database (NO re-parsing).
 async function viewFile(fileId) {
-  try {
-    const result = await api(`/files/${encodeURIComponent(fileId)}/invoice`);
-    showInvoice(result.parsed_data, fileId);
-  } catch (error) {
-    if (error.message.includes("404")) {
-      throw new Error("This invoice hasn't been parsed yet. Click 'Parse' first.");
-    }
-    throw error;
+  const file = filesById.get(String(fileId))
+    ?? await api(`/files/${encodeURIComponent(fileId)}`);
+  if (file.invoice == null) {
+    throw new Error("This invoice hasn't been parsed yet. Click 'Parse' first.");
   }
+  showInvoice(file.invoice, fileId);
 }
 
 // Delete a file and refresh the list.
@@ -331,7 +483,9 @@ function showInvoice(invoice, fileId) {
     ["Invoice number", invoice.invoice_number],
     ["Date", invoice.date],
     ["Order number", invoice.order_number],
-    ["Total", invoice.total],
+    ["Subtotal", formatMoney(invoice.subtotal)],
+    ["Tax", formatMoney(invoice.tax_amount)],
+    ["Total", formatMoney(invoice.total)],
     ["Address", invoice.address],
   ].forEach(([label, value]) => addInvoiceField(fields, label, value));
 
@@ -366,14 +520,27 @@ function showInvoice(invoice, fileId) {
       const row = document.createElement("tr");
       addCell(row, item.description);
       addCell(row, item.quantity);
-      addCell(row, item.unit_price);
-      addCell(row, item.amount);
+      addCell(row, formatMoney(item.unit_price));
+      addCell(row, formatMoney(item.amount));
       tableBody.append(row);
     });
   }
   table.append(tableBody);
 
-  invoiceContent.replaceChildren(fields, heading, table);
+  const content = [fields];
+  const warnings = Array.isArray(invoice.validation_warnings)
+    ? invoice.validation_warnings
+    : [];
+  if (warnings.length > 0 || invoice.status === "needs_review") {
+    const notice = document.createElement("p");
+    notice.className = "invoice-review";
+    notice.textContent = warnings.length > 0
+      ? `Please verify this invoice against the source document: ${warnings.join(" ")}`
+      : "Some extracted amounts did not pass arithmetic checks. Verify the values against the source invoice before using them.";
+    content.push(notice);
+  }
+  content.push(heading, table);
+  invoiceContent.replaceChildren(...content);
   resultSection.dataset.fileId = String(fileId);
   resultSection.hidden = false;
   resultSection.scrollIntoView({ block: "start" });
@@ -409,6 +576,9 @@ document.querySelector("#single-upload-form").addEventListener("submit", (event)
 document.querySelector("#batch-upload-form").addEventListener("submit", (event) => {
   runRequest(() => uploadBatch(event));
 });
+document.querySelector("#parse-all").addEventListener("click", () => {
+  runRequest(parseAllFiles);
+});
 document.querySelector("#refresh-files").addEventListener("click", () => {
   runRequest(loadFiles);
 });
@@ -433,11 +603,14 @@ authToggle.addEventListener("click", () => {
   }
 });
 document.querySelector("#logout-button").addEventListener("click", handleLogout);
+filesTab.addEventListener("click", () => showWorkspacePage("files"));
+invoicesTab.addEventListener("click", () => showWorkspacePage("invoices"));
 
 function init() {
   if (localStorage.getItem("token")) {
     authSection.classList.add("hidden");
     mainApp.classList.remove("hidden");
+    showWorkspacePage("files");
 
     // Start auto-refresh immediately on page load if logged in
     startPolling();

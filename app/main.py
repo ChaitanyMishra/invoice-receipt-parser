@@ -33,14 +33,14 @@ from app.database import engine
 from app.models import User
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
-from app.tasks import process_file
-from crud_batch import create_batch
 from crud_invoice import create_invoice
 from crud_uploaded_file import (
     create_uploaded_file,
     delete_file,
-    files,
+    get_files_with_invoices,
+    get_file_with_invoice,
     get_file_by_id,
+    update_file_status,
     update_extracted_text,
 )
 from crud_user import create_user, get_user_by_email
@@ -54,6 +54,8 @@ class UserRegister(BaseModel):
 redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"), decode_responses=True)  # type: ignore
 
 UPLOAD_DIR = "uploads"
+PARSE_LIMIT = 3
+PARSE_WINDOW_SECONDS = 60
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI()
@@ -135,8 +137,7 @@ def get_documents(current_user: User = Depends(get_current_user)):
         logger.info("CACHE HIT")
         return json.loads(redis_cache)
     logger.info("CACHE MISS")
-    db_files = files(user_id=current_user.id)
-    file_list = [f.model_dump() for f in db_files]
+    file_list = get_files_with_invoices(current_user.id)
     redis_client.set(cache_key, json.dumps(file_list, default=str), ex=60)
 
     return file_list
@@ -149,7 +150,7 @@ def get_file(file_id: int , current_user:User=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="file not found")
     if file.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this file")
-    return file
+    return get_file_with_invoice(file_id)
 
 
 @app.delete("/files/{file_id}")
@@ -208,12 +209,31 @@ def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
         raise HTTPException(
             status_code=400, detail="pdf contains more than 1 invoice"
         )
+
+    parse_count = redis_client.eval(
+        "local count = redis.call('INCR', KEYS[1]); "
+        "if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; "
+        "return count",
+        1,
+        "invoice_parse_limit",
+        PARSE_WINDOW_SECONDS,
+    )
+    if parse_count > PARSE_LIMIT:
+        retry_after = max(redis_client.ttl("invoice_parse_limit"), 1)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Parsing is limited to {PARSE_LIMIT} files per minute. Try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     logger.info(f"Parsing file {file_id} for user {current_user.id}")
     parsed_dict = parse_invoice_text(file.extracted_text)
     if not parsed_dict:
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
 
     invoice_id = create_invoice(parsed_dict, file_id)
+    file_status = "review" if parsed_dict.get("validation_warnings") else "completed"
+    update_file_status(file_id, file_status)
     redis_client.delete(f"my_files:user:{current_user.id}")
     return {
         "status": "parsed",
@@ -230,9 +250,6 @@ async def batch_upload(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
-    batch_id = create_batch(len(files))
-    upload_file_ids = []
-
     for file in files:
         filename = file.filename or "unnamed_file"
         filepath = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}_{filename}")
@@ -241,21 +258,15 @@ async def batch_upload(
         with open(filepath, "wb") as f:
             f.write(read_file)
 
-        # FIX: Save user_id
-        file_id = create_uploaded_file(
+        create_uploaded_file(
             filename=filename,
             size=len(read_file),
             filepath=filepath,
-            batch_id=batch_id,
             user_id=current_user.id
-        ).id
-        upload_file_ids.append(file_id)
+        )
         redis_client.delete(f"my_files:user:{current_user.id}")
 
-    for file_id in upload_file_ids:
-        process_file.delay(file_id)
-
-    return {"batch_id": batch_id, "total_files": len(files), "status": "queued"}
+    return {"total_files": len(files), "status": "uploaded"}
 
 
 @app.post("/register", status_code=201)

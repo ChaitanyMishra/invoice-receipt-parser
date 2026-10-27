@@ -1,3 +1,5 @@
+import os
+import redis
 from sqlmodel import Session,update
 from app.database import engine
 from app.models import Batch, UploadedFile
@@ -5,6 +7,12 @@ from app.celery_app import celery_app
 from app.services.pdf_extractor import extract_text_from_pdf
 from app.services.invoice_parser import parse_invoice_text
 from crud_invoice import create_invoice
+
+redis_client = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
+
 
 @celery_app.task(autoretry_for=(ConnectionError,TimeoutError),
         retry_backoff=True,
@@ -25,6 +33,7 @@ def process_file(file_id:int):
 
         file.status ='processing'
         session.commit()
+        redis_client.delete(f"my_files:user:{file.user_id}")
 
         try:
 
@@ -39,7 +48,11 @@ def process_file(file_id:int):
             create_invoice(parsed_text,file_id)
 
 
-            file.status = "completed"
+            file.status = (
+                "review"
+                if parsed_text.get("validation_warnings")
+                else "completed"
+            )
             if batch:
                 session.exec(update(Batch).where(Batch.id==batch.id).values(completed_files=Batch.completed_files+1))
 
@@ -64,8 +77,7 @@ def process_file(file_id:int):
                 batch.status='processing'
 
         session.commit()
-
-
+        redis_client.delete(f"my_files:user:{file.user_id}")
 
 
 
