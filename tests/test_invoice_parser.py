@@ -27,6 +27,36 @@ Grand Total: ₹ 1,180.00
     assert extract_tax(text) == "180.00"
 
 
+def test_extract_total_handles_ocr_prefix_and_ignores_tax_summary_row():
+    text = """\
+Taxable Value: 523,758.00
+IGST 18%: 94,276.44
+Total ī6,18,034.00
+Total: 523,758.00 94,276.44 94,276.44
+"""
+    assert extract_total(text) == "618034.00"
+    assert extract_tax(text) == "94276.44"
+
+
+def test_extract_total_ignores_pdf_font_markers_in_tally_style_rows():
+    text = """\
+Total (cid:299) 6,18,034.00
+Taxable IGST Total
+Total: 5,23,758.00 94,276.44 94,276.44
+"""
+    assert extract_total(text) == "618034.00"
+
+
+def test_extract_total_supports_common_accounting_labels():
+    for label in (
+        "Grand Total (including tax): ₹ 1,180.00",
+        "Total Payable: INR 1,180.00",
+        "Invoice Value: Rs. 1,180.00",
+        "Amount Due: 1,180.00",
+    ):
+        assert extract_total(label) == "1180.00"
+
+
 def test_cross_validation_flags_inconsistent_invoice_arithmetic():
     parsed = {
         "subtotal": "1000.00",
@@ -43,11 +73,17 @@ def test_cross_validation_flags_inconsistent_invoice_arithmetic():
     )
 
 
-@patch("app.services.invoice_parser.extract_line_items_gemini", return_value=[])
-@patch("app.services.invoice_parser.extract_line_items_groq", return_value=[])
-@patch("app.services.invoice_parser.extract_missing_data_gemini", return_value={})
-@patch("app.services.invoice_parser.extract_missing_data_groq", return_value={})
-def test_parser_keeps_total_and_subtotal_and_returns_review_warnings(*_mocks):
+@patch(
+    "app.services.invoice_parser.extract_invoice_data_gemini",
+    return_value={"fields": {}, "line_items": []},
+)
+@patch(
+    "app.services.invoice_parser.extract_invoice_data_groq",
+    return_value={"fields": {}, "line_items": []},
+)
+def test_parser_keeps_total_and_subtotal_and_returns_review_warnings(
+    groq_mock, gemini_mock
+):
     text = """\
 Invoice Number: INV-42
 Invoice Date: 01-10-2026
@@ -63,3 +99,5 @@ Grand Total: ₹ 1,180.00
     assert parsed["tax_amount"] == "180.00"
     assert parsed["total"] == "1180.00"
     assert parsed["validation_warnings"] == []
+    groq_mock.assert_called_once()
+    gemini_mock.assert_not_called()

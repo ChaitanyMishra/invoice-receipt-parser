@@ -1,14 +1,16 @@
 from decimal import Decimal, InvalidOperation
 import re
 
-from app.services.llm_extractor import extract_missing_data_gemini, extract_missing_data_groq
-from app.services.llm_extractor import extract_line_items_gemini , extract_line_items_groq
+from app.services.llm_extractor import (
+    extract_invoice_data_gemini,
+    extract_invoice_data_groq,
+)
 from crud_invoice import parse_date
 
 
 MONEY_FIELDS = {"total", "tax_amount", "subtotal"}
 AMOUNT_TOKEN = re.compile(
-    r"(?<![\w/])(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?(?!\d)"
+    r"(?<![A-Za-z0-9_/,])(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?(?!\d)"
 )
 
 
@@ -65,26 +67,48 @@ def validate_field(field: str, value):
 
 
 def _line_amounts(line: str):
+    line = re.sub(r"\(\s*cid\s*:\s*\d+\s*\)", " ", line, flags=re.I)
     return [parse_amount(value) for value in AMOUNT_TOKEN.findall(line)]
 
 
 def extract_total(text: str):
     candidates = []
     lines = text.splitlines()
-    excluded = re.compile(r"\b(?:sub[\s-]?total|taxable|cgst|sgst|igst|tax|quantity|qty)\b", re.I)
+    excluded = re.compile(
+        r"\b(?:sub[\s-]?total|taxable|cgst|sgst|igst|quantity|qty)\b", re.I
+    )
+    tax_total = re.compile(
+        r"\b(?:total\s+(?:tax|gst|vat)|(?:tax|gst|vat)\s+total)\b", re.I
+    )
     labels = (
-        (5, re.compile(r"\b(?:grand\s+total|net\s+payable|amount\s+payable)\b", re.I)),
-        (4, re.compile(r"\b(?:invoice\s+total|total\s+amount)\b", re.I)),
+        (
+            5,
+            re.compile(
+                r"\b(?:grand\s+total|total\s+invoice\s+value|total\s+payable|net\s+payable)\b",
+                re.I,
+            ),
+        ),
+        (
+            4,
+            re.compile(
+                r"\b(?:invoice\s+total|total\s+amount|invoice\s+amount|total\s+due|amount\s+due|amount\s+payable|invoice\s+value)\b",
+                re.I,
+            ),
+        ),
         (2, re.compile(r"\btotal\b", re.I)),
     )
 
     for index, line in enumerate(lines):
-        if excluded.search(line):
+        if excluded.search(line) or tax_total.search(line):
             continue
         strength = next((rank for rank, pattern in labels if pattern.search(line)), None)
         if strength is None:
             continue
         values = _line_amounts(line)
+        if re.match(r"\s*total\s*:", line, re.I) and len(
+            [value for value in values if value is not None]
+        ) > 1:
+            continue
         if not values and index + 1 < len(lines):
             values = _line_amounts(lines[index + 1])
         values = [value for value in values if value is not None]
@@ -175,10 +199,10 @@ def cross_validation(parsed: dict):
 
 FIELD_PATTERNS = {
 "invoice_number": [
-    r"Invoice Number\s*:\s*(\S+)",                      # Amazon
-    r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",         # Supercloud (with "Dated" label)
-    r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",          # Supercloud (no "Dated")
-    r"Bill No\.?\s*:?\s*(\S+)",                         # Bill format
+    r"Invoice Number\s*:\s*(\S+)",
+    r"Invoice No\.?\s*Dated\s*[\r\n]+\s*(\S+)",
+    r"Invoice No\.?\s*[\r\n]+\s*([\w/]+-\d+)",
+    r"Bill No\.?\s*:?\s*(\S+)",
 ],
         "date": [
             r"Invoice Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
@@ -212,7 +236,7 @@ def extract_field(field:str , text:str):
     return None
 
 
-def parse_invoice_text(text: str) -> dict:
+def parse_invoice_text(text: str, use_llm: bool = True) -> dict:
     if not text:
         return {}
     parsed_text = {}
@@ -235,40 +259,34 @@ def parse_invoice_text(text: str) -> dict:
     parsed_text["address"] = None
 
     missing_field = [
-        key for key, value in parsed_text.items() if value is None
+        key
+        for key, value in parsed_text.items()
+        if value is None and key not in MONEY_FIELDS
     ]
     llm_result = {}
-    if missing_field:
+    if use_llm:
         try:
-            llm_result = extract_missing_data_groq(text, missing_field)
+            llm_result = extract_invoice_data_groq(text, missing_field)
         except Exception as e:
             # Log it, but don't crash
             print(f"Groq failed: {e}")
-    if not llm_result:
+    if use_llm and not llm_result:
         try:
-            llm_result = extract_missing_data_gemini(text, missing_field)
+            llm_result = extract_invoice_data_gemini(text, missing_field)
         except Exception as e:
             print(f"Gemini failed: {e}")
-    if isinstance(llm_result,dict):
+    llm_fields = llm_result.get("fields", llm_result)
+    if isinstance(llm_fields, dict):
         for field in missing_field:
-            value = llm_result.get(field)
+            value = llm_fields.get(field)
             if value is not None and validate_field(field, value):
                 parsed_text[field] = str(value)
             elif value is not None:
                 parsed_text[field] = None
 
-    line_items = []
-    try:
-        line_items = extract_line_items_groq(text)
-
-    except Exception as e:
-        print(f"LLM Extraction failed: {e}")
-
-    if not line_items:
-        try:
-            line_items = extract_line_items_gemini(text)
-        except Exception as e:
-            print(f"LLM Extraction failed: {e}")
+    line_items = llm_result.get("line_items", []) if use_llm else []
+    if not isinstance(line_items, list):
+        line_items = []
     parsed_text["line_items"] = [
         {
             "description": str(item["description"]).strip(),

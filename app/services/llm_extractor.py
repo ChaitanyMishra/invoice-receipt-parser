@@ -8,6 +8,52 @@ from openai import OpenAI
 
 load_dotenv()
 
+def _invoice_data_prompt(text: str, missing_data: list[str]) -> str:
+    field_list = ", ".join(missing_data) if missing_data else "no additional fields"
+    return f"""Extract invoice details from the invoice text below.
+
+Return one JSON object with:
+- "fields": an object containing only these missing text fields: {field_list}
+- "line_items": an array of itemized invoice rows
+
+For each line item return description, quantity, unit_price, and amount.
+Use numeric values for amounts, and null when a value is not shown. Include
+only actual item rows; exclude tax, subtotal, total, round-off, headers, and
+amount-in-words text. Do not invent values. For seller details, use the seller,
+not the buyer or shipping address.
+
+Invoice text:
+{text}"""
+
+
+def extract_invoice_data_groq(text: str, missing_data: list[str]) -> dict:
+    if not text:
+        return {}
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=os.getenv("GROQ_API_KEY"),
+        timeout=15.0,
+    )
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=[{"role": "user", "content": _invoice_data_prompt(text, missing_data)}],
+        response_format={"type": "json_object"},
+    )
+    content = response.choices[0].message.content
+    return json.loads(content) if content else {}
+
+
+def extract_invoice_data_gemini(text: str, missing_data: list[str]) -> dict:
+    if not text:
+        return {}
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=_invoice_data_prompt(text, missing_data),
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
+    )
+    return json.loads(response.text) if response.text else {}
+
 
 def extract_missing_data_gemini(text: str, missing_data: list) -> dict:
     if not text:
@@ -193,5 +239,4 @@ def extract_line_items_groq(text:str) -> list:
     if not raw:
         return []
     return json.loads(raw).get("line_items", [])
-
 

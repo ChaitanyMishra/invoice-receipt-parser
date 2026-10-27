@@ -1,16 +1,16 @@
-import sys
-import time
+import argparse
+from time import perf_counter
 from pathlib import Path
 
 from app.services.pdf_extractor import extract_text_from_pdf
 from app.services.invoice_parser import parse_invoice_text
 
 
-def benchmark_one(pdf_path: str) -> dict:
+def benchmark_one(pdf_path: str, use_llm: bool = False) -> dict:
     """Process one PDF, return timing + results."""
-    t0 = time.time()
+    t0 = perf_counter()
     text = extract_text_from_pdf(pdf_path)
-    t1 = time.time()
+    t1 = perf_counter()
 
     if not text:
         return {
@@ -24,9 +24,9 @@ def benchmark_one(pdf_path: str) -> dict:
             "error": "no text extracted",
         }
 
-    t2 = time.time()
-    parsed = parse_invoice_text(text)
-    t3 = time.time()
+    t2 = perf_counter()
+    parsed = parse_invoice_text(text, use_llm=use_llm)
+    t3 = perf_counter()
 
     return {
         "file": pdf_path,
@@ -36,20 +36,35 @@ def benchmark_one(pdf_path: str) -> dict:
         "total": parsed.get("total"),
         "tax_amount": parsed.get("tax_amount"),
         "line_items": len(parsed.get("line_items", [])),
+        "validation_warnings": parsed.get("validation_warnings", []),
         "error": None,
     }
 
 
 def main():
-    folder = sys.argv[1] if len(sys.argv) > 1 else "test_data/invoices/APR"
+    parser = argparse.ArgumentParser(description="Benchmark invoice extraction and parsing.")
+    parser.add_argument(
+        "folder",
+        nargs="?",
+        default="test_data/invoices/APR",
+        help="Folder containing PDFs (searched recursively)",
+    )
+    parser.add_argument(
+        "--with-llm",
+        action="store_true",
+        help="Include provider calls (slower and consumes API quota)",
+    )
+    args = parser.parse_args()
+    folder = args.folder
     pdfs = sorted(Path(folder).rglob("*.pdf"))
 
     print(f"Found {len(pdfs)} PDFs in {folder}")
+    print(f"Parse mode: {'LLM' if args.with_llm else 'regex-only (default)'}")
     print("=" * 80)
 
     results = []
     for pdf in pdfs:
-        result = benchmark_one(str(pdf))
+        result = benchmark_one(str(pdf), use_llm=args.with_llm)
         results.append(result)
 
         print(f"\n{Path(result['file']).name}")
@@ -62,6 +77,8 @@ def main():
             print(f"  total:          {result['total']}")
             print(f"  tax_amount:     {result['tax_amount']}")
             print(f"  line_items:     {result['line_items']}")
+            if result["validation_warnings"]:
+                print(f"  review:         {' '.join(result['validation_warnings'])}")
 
     # Summary
     total_extract = sum(r["extract_time"] for r in results)
@@ -74,7 +91,8 @@ def main():
     print(f"  Errors:           {errors}")
     print(f"  Total extract:    {total_extract:.2f}s")
     print(f"  Total parse:      {total_parse:.2f}s")
-    print(f"  Avg per file:     {(total_extract + total_parse) / len(results):.2f}s")
+    average = (total_extract + total_parse) / len(results) if results else 0
+    print(f"  Avg per file:     {average:.2f}s")
 
 
 if __name__ == "__main__":

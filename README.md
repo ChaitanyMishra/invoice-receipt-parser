@@ -98,29 +98,35 @@ flowchart TD
 
 ## Field Extraction Strategy
 
+### Per-field strategy
+
 | Field | Strategy | Notes |
 |---|---|---|
 | `invoice_number` | Regex | Multi-pattern, first match wins |
 | `date` | Regex | Multiple formats (`parse_date` normalizes) |
 | `gstin` | Regex | Via GSTIN/UIN label; validated against Indian GSTIN format rules |
 | `order_number` | Regex | Order / Reference No. labels |
-| `total` | Regex | Amazon and sample-invoice formats |
-| `tax_amount` | Regex | IGST / CGST / SGST labels |
+| `total` | Regex | Labels such as Grand Total, Total Payable, Invoice Value, or Amount Due; excludes tax-summary rows and PDF font markers |
+| `tax_amount` | Regex | IGST / CGST / SGST amounts |
 | `subtotal` | Regex | Taxable value / subtotal labels |
-| `vendor_name` | LLM only | Complex, unstructured field |
-| `address` | LLM only | Complex, unstructured field |
-| `line_items` | LLM only | Multi-line table structure extraction |
+| `vendor_name` | LLM fallback | Context-dependent text |
+| `address` | LLM fallback | Context-dependent text |
+| `line_items` | LLM fallback | Multi-line table extraction |
+
+### Pipeline stages
 
 | Stage | Responsibility | Fields |
 |---|---|---|
 | Regex | Fast, free, deterministic | `invoice_number`, `date`, `gstin`, `order_number`, `total`, `tax_amount`, `subtotal` |
 | Validation | Rejects malformed values | Amount format, arithmetic, and cross-field checks |
-| LLM fallback | Context-dependent text and tables | `vendor_name`, `address`, `line_items` |
+| LLM fallback | One combined provider request for missing details | `vendor_name`, `address`, `line_items`, and any other missing fields |
 | Review status | Flagged for manual verification | Missing or inconsistent invoice amounts |
 
 **Regex-only parse time:** ~0.001 s per invoice.
 
-Extracted amounts should still be checked against the source invoice. Inconsistent or unverified totals are marked for review; parsing does not guarantee tax compliance or accounting accuracy.
+The benchmark script in `scripts/` runs regex-only by default to avoid provider latency and API usage. Pass `--with-llm` to include provider calls when measuring end-to-end parsing; this consumes API quota.
+
+> Extracted amounts should still be checked against the source invoice. Inconsistent or unverified totals are marked for review; parsing does not guarantee tax compliance or accounting accuracy.
 
 ---
 
@@ -199,13 +205,13 @@ celery -A app.celery_app worker --loglevel=info --concurrency=2
 
 ## Running with Docker
 
-The repository includes a `Dockerfile` and `docker-compose.yml`. From the project root:
+The repository includes a `Dockerfile` and `docker-compose.yml`. Make sure your `.env` file exists first, then run from the project root:
 
 ```bash
 docker compose up --build
 ```
 
-Make sure your `.env` file exists first. Check `docker-compose.yml` for the services and ports it exposes.
+Check `docker-compose.yml` for the services and ports it exposes.
 
 ---
 
