@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,7 @@ from pydantic import BaseModel, EmailStr
 from sqlmodel import SQLModel
 from tomlkit import ws
 from crud_invoice import get_invoice_by_id
-
+from contextlib import asynccontextmanager
 from app.auth import (
     create_access_token,
     decode_access_token,
@@ -52,10 +53,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app = FastAPI()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(app:FastAPI):
     SQLModel.metadata.create_all(bind=engine)
+    yield
 
 
 def invoice_count(text: str):
