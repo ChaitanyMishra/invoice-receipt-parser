@@ -10,8 +10,8 @@
 ![Celery](https://img.shields.io/badge/Celery-37814A?logo=celery&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
-A backend service that turns uploaded invoices and receipts into structured data.
 
+A backend service that turns uploaded invoices and receipts into structured data.
 It uses **labeled-text regex** first for speed and zero cost, **validates** monetary values and arithmetic, and calls **LLMs (Groq → Gemini)** only for fields that need contextual extraction. Multi-file uploads stay *pending* until parsing is requested, and the API limits parsing to three files per minute. If every LLM provider fails, the pipeline still returns the regex results instead of crashing.
 
 ---
@@ -527,4 +527,6 @@ pytest
 
 **Chaitany Mishra**
 
-[GitHub](https://github.com/ChaitanyMishra) · [LinkedIn](https://www.linkedin.com/in/chaitanymishra/)
+[GitHub](https://github.com/ChaitanyMishra) · [LinkedIn](https://www.linkedin.com/in/chaitanymishra/) 
+
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/ChaitanyaMishra/badge.svg)](https://hub.xerj.org/contributors/ChaitanyaMishra)
