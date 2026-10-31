@@ -529,4 +529,4 @@ pytest
 
 [GitHub](https://github.com/ChaitanyMishra) · [LinkedIn](https://www.linkedin.com/in/chaitanymishra/) 
 
-[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/ChaitanyaMishra/badge.svg)](https://hub.xerj.org/contributors/ChaitanyaMishra)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/ChaitanyMishra/badge.svg)](https://hub.xerj.org/contributors/ChaitanyMishra)
