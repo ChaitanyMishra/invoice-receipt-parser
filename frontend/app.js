@@ -16,11 +16,9 @@ const invoicesPage = document.querySelector("#invoices-page");
 const filesTab = document.querySelector("#files-tab");
 const invoicesTab = document.querySelector("#invoices-tab");
 
-// Global variable for the auto-refresh interval
 let pollInterval;
 let filesById = new Map();
 
-// Send all requests through one place so authentication stays consistent.
 async function api(path, options = {}) {
   const { responseType, ...requestOptions } = options;
   const headers = new Headers(requestOptions.headers || {});
@@ -81,8 +79,6 @@ async function handleLogin(event) {
   localStorage.setItem("token", result.access_token);
   authSection.classList.add("hidden");
   mainApp.classList.remove("hidden");
-
-  // Start auto-refresh on login
   startPolling();
   await loadFiles();
 }
@@ -116,7 +112,6 @@ function showLoginForm() {
   authToggle.textContent = "Need an account? Register";
 }
 
-// Display request activity and temporarily disable every button.
 function setBusy(isBusy) {
   document.querySelectorAll("button").forEach((button) => {
     button.disabled = isBusy;
@@ -124,7 +119,6 @@ function setBusy(isBusy) {
   loadingMessage.hidden = !isBusy;
 }
 
-// Run a UI operation and report request errors in the page.
 async function runRequest(operation) {
   setBusy(true);
   errorMessage.hidden = true;
@@ -138,7 +132,6 @@ async function runRequest(operation) {
   }
 }
 
-// Build a table cell using textContent so API data is never interpreted as markup.
 function addCell(row, value, className = "") {
   const cell = document.createElement("td");
   cell.textContent = value ?? "—";
@@ -147,7 +140,6 @@ function addCell(row, value, className = "") {
   return cell;
 }
 
-// Create a file action button with its request handler.
 function actionButton(label, className, handler) {
   const button = document.createElement("button");
   button.type = "button";
@@ -157,13 +149,11 @@ function actionButton(label, className, handler) {
   return button;
 }
 
-// Fetch and render the uploaded file records.
 async function loadFiles() {
   const files = await api("/get_upload_data");
   renderFiles(files);
 }
 
-// Render the table (separated so polling doesn't trigger the loading spinner)
 function renderFiles(files) {
   if (!Array.isArray(files)) {
     throw new Error("The file-list response was not an array.");
@@ -173,6 +163,7 @@ function renderFiles(files) {
   filesById = new Map(files.map((file) => [String(file.id), file]));
   renderInvoices(files);
   filesBody.replaceChildren();
+
   if (files.length === 0) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
@@ -190,8 +181,10 @@ function renderFiles(files) {
     const status = hasInvoice
       ? (file.invoice.status === "needs_review" ? "review" : "completed")
       : file.status;
+
     addCell(row, file.id);
     addCell(row, file.filename);
+
     const statusClasses = {
       completed: "status-green",
       pending: "status-yellow",
@@ -204,17 +197,23 @@ function renderFiles(files) {
     statusBadge.className = `status-badge ${statusClasses[status] || "status-yellow"}`;
     statusBadge.textContent = status === "review" ? "Needs review" : status;
     statusCell.append(statusBadge);
+
     const actions = addCell(row, "", "actions");
     const group = document.createElement("div");
     group.className = "action-group";
     group.append(actionButton("Extract", "", () => extractFile(file.id)));
+
     if (!hasInvoice && status !== "processing") {
       group.append(actionButton("Parse", "", () => parseFile(file.id)));
     }
+
     if (hasInvoice) {
       group.append(actionButton("View", "", () => viewFile(file.id)));
+      // NEW: Deep Parse Button for LLM
+      group.append(actionButton("Deep Parse (LLM)", "secondary-button", () => deepParseFile(file.id)));
       group.append(actionButton("Re-parse", "secondary-button", () => parseFile(file.id)));
     }
+
     group.append(actionButton("Delete", "delete-button", () => deleteFile(file.id)));
     actions.append(group);
     filesBody.append(row);
@@ -293,14 +292,11 @@ function formatMoney(value) {
   })}`;
 }
 
-// Upload one selected file using the backend's `file` multipart field.
 async function uploadFile(event) {
   event.preventDefault();
   const input = document.querySelector("#single-file");
   const file = input.files[0];
-  if (!file) {
-    throw new Error("Choose a file to upload.");
-  }
+  if (!file) throw new Error("Choose a file to upload.");
 
   const formData = new FormData();
   formData.append("file", file);
@@ -311,59 +307,45 @@ async function uploadFile(event) {
   startPolling();
 }
 
-// Upload selected files using the backend's repeated `files` multipart field.
 async function uploadBatch(event) {
   event.preventDefault();
   const input = document.querySelector("#batch-files");
-  if (input.files.length === 0) {
-    throw new Error("Choose at least one file to upload.");
-  }
+  if (input.files.length === 0) throw new Error("Choose at least one file to upload.");
 
   const formData = new FormData();
   Array.from(input.files).forEach((file) => formData.append("files", file));
   const result = await api("/batch-upload", { method: "POST", body: formData });
   input.value = "";
   await loadFiles();
-  batchNotice.textContent =
-    `Uploaded ${result.total_files} files. Click "Parse All Pending" to parse up to 50.`;
+  batchNotice.textContent = `Uploaded ${result.total_files} files. Click "Parse All Pending".`;
   startPolling();
 }
 
-// Parse up to 50 unparsed files per click, one at a time.
 async function parseAllFiles() {
+  stopPolling(); // Stop polling to prevent network spam
   const files = await api("/get_upload_data");
-  if (!Array.isArray(files)) {
-    throw new Error("The file-list response was not an array.");
-  }
+  if (!Array.isArray(files)) throw new Error("The file-list response was not an array.");
 
   const pendingFiles = files.filter(
-    (file) =>
-      !file.invoice &&
-      file.status !== "completed" &&
-      file.status !== "processing",
+    (file) => !file.invoice && file.status !== "completed" && file.status !== "processing",
   );
   const filesToParse = pendingFiles.slice(0, 50);
   const failures = [];
+
   for (const [index, file] of filesToParse.entries()) {
     try {
+      // Update UI text to show progress
+      batchNotice.textContent = `Parsing file ${index + 1} of ${filesToParse.length}: ${file.filename}`;
+
       if (!file.has_extracted_text) {
-        const extraction = await api(
-          `/files/${encodeURIComponent(file.id)}/extract`,
-          { method: "POST" },
-        );
-        if (extraction.status === "no_text_extracted") {
-          throw new Error(extraction.note);
-        }
+        const extraction = await api(`/files/${encodeURIComponent(file.id)}/extract`, { method: "POST" });
+        if (extraction.status === "no_text_extracted") throw new Error(extraction.note);
       }
-      await api(`/files/${encodeURIComponent(file.id)}/parse`, {
-        method: "POST",
-      });
+      await api(`/files/${encodeURIComponent(file.id)}/parse`, { method: "POST" });
+
+      // NO 1-second delay! Just let it run.
     } catch (error) {
       failures.push(`File #${file.id}: ${error.message}`);
-    }
-
-    if (index < filesToParse.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
@@ -371,77 +353,62 @@ async function parseAllFiles() {
   if (failures.length > 0) {
     throw new Error(`Some files could not be parsed:\n${failures.join("\n")}`);
   }
-  batchNotice.textContent =
-    `Parsed ${filesToParse.length} file(s). ${pendingFiles.length - filesToParse.length} remaining.`;
+
+  batchNotice.textContent = `Successfully parsed ${filesToParse.length} file(s).`;
   startPolling();
 }
 
-// Extract text from a single uploaded file.
-async function extractFile(fileId) {
-  const result = await api(`/files/${encodeURIComponent(fileId)}/extract`, {
-    method: "POST",
-  });
-  if (result.status === "no_text_extracted") {
-    batchNotice.textContent = result.note;
-  } else {
-    batchNotice.textContent = `Text extracted from file #${fileId}.`;
-  }
-  await loadFiles();
-}
-
-// Parse an uploaded file and display the parsed invoice fields.
-async function parseFile(fileId) {
-  const file = filesById.get(String(fileId));
-  if (file && !file.has_extracted_text) {
-    const extraction = await api(
-      `/files/${encodeURIComponent(fileId)}/extract`,
-      { method: "POST" },
-    );
-    if (extraction.status === "no_text_extracted") {
-      throw new Error(extraction.note);
-    }
-  }
-  const result = await api(`/files/${encodeURIComponent(fileId)}/parse`, {
+// NEW: Deep parse using the LLM
+async function deepParseFile(fileId) {
+  batchNotice.textContent = "Running Deep Parse (LLM) - this may take 15 seconds...";
+  const result = await api(`/files/${encodeURIComponent(fileId)}/parse?force_llm=true`, {
     method: "POST",
   });
   showInvoice(result.parsed_data, fileId);
   await loadFiles();
+  batchNotice.textContent = `Deep Parse complete for file #${fileId}.`;
 }
 
-// Fetch an already parsed invoice from the database (NO re-parsing).
-async function viewFile(fileId) {
-  const file = filesById.get(String(fileId))
-    ?? await api(`/files/${encodeURIComponent(fileId)}`);
-  if (file.invoice == null) {
-    throw new Error("This invoice hasn't been parsed yet. Click 'Parse' first.");
+async function extractFile(fileId) {
+  const result = await api(`/files/${encodeURIComponent(fileId)}/extract`, { method: "POST" });
+  batchNotice.textContent = result.status === "no_text_extracted"
+    ? result.note
+    : `Text extracted from file #${fileId}.`;
+  await loadFiles();
+}
+
+async function parseFile(fileId) {
+  const file = filesById.get(String(fileId));
+  if (file && !file.has_extracted_text) {
+    const extraction = await api(`/files/${encodeURIComponent(fileId)}/extract`, { method: "POST" });
+    if (extraction.status === "no_text_extracted") throw new Error(extraction.note);
   }
+  const result = await api(`/files/${encodeURIComponent(fileId)}/parse`, { method: "POST" });
+  showInvoice(result.parsed_data, fileId);
+  await loadFiles();
+}
+
+async function viewFile(fileId) {
+  const file = filesById.get(String(fileId)) ?? await api(`/files/${encodeURIComponent(fileId)}`);
+  if (file.invoice == null) throw new Error("This invoice hasn't been parsed yet.");
   showInvoice(file.invoice, fileId);
 }
 
-// Delete a file and refresh the list.
 async function deleteFile(fileId) {
   try {
     await api(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
   } catch (error) {
-    if (!error.message.includes("404")) {
-      throw error;
-    }
+    if (!error.message.includes("404")) throw error;
   }
   await loadFiles();
-  if (resultSection.dataset.fileId === String(fileId)) {
-    resultSection.hidden = true;
-  }
+  if (resultSection.dataset.fileId === String(fileId)) resultSection.hidden = true;
 }
 
-// Download the server-generated Excel workbook through the shared API helper.
 async function downloadInvoices() {
   const button = document.querySelector("#download-excel");
   button.textContent = "Preparing...";
   try {
-    const workbook = await api("/invoices/export", {
-      method: "GET",
-      responseType: "blob",
-    });
+    const workbook = await api("/invoices/export", { method: "GET", responseType: "blob" });
     const url = URL.createObjectURL(workbook);
     const link = document.createElement("a");
     link.href = url;
@@ -455,37 +422,25 @@ async function downloadInvoices() {
   }
 }
 
-// Add a text-only invoice field to the result card.
 function addInvoiceField(fields, label, value) {
   const wrapper = document.createElement("div");
   const term = document.createElement("dt");
   const description = document.createElement("dd");
   term.textContent = label;
-  description.textContent = value === null || value === undefined || value === ""
-    ? "—"
-    : String(value);
+  description.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
   wrapper.append(term, description);
   fields.append(wrapper);
 }
 
-// Render parsed invoice details and line items without injecting HTML.
 function showInvoice(invoice, fileId) {
-  if (!invoice || typeof invoice !== "object") {
-    throw new Error("The parse response did not include invoice data.");
-  }
+  if (!invoice || typeof invoice !== "object") throw new Error("The parse response did not include invoice data.");
 
   const fields = document.createElement("dl");
   fields.className = "invoice-fields";
   [
-    ["Vendor", invoice.vendor_name],
-    ["GSTIN", invoice.gstin],
-    ["Invoice number", invoice.invoice_number],
-    ["Date", invoice.date],
-    ["Order number", invoice.order_number],
-    ["Subtotal", formatMoney(invoice.subtotal)],
-    ["Tax", formatMoney(invoice.tax_amount)],
-    ["Total", formatMoney(invoice.total)],
-    ["Address", invoice.address],
+    ["Vendor", invoice.vendor_name], ["GSTIN", invoice.gstin], ["Invoice number", invoice.invoice_number],
+    ["Date", invoice.date], ["Order number", invoice.order_number], ["Subtotal", formatMoney(invoice.subtotal)],
+    ["Tax", formatMoney(invoice.tax_amount)], ["Total", formatMoney(invoice.total)], ["Address", invoice.address],
   ].forEach(([label, value]) => addInvoiceField(fields, label, value));
 
   const heading = document.createElement("h3");
@@ -527,15 +482,13 @@ function showInvoice(invoice, fileId) {
   table.append(tableBody);
 
   const content = [fields];
-  const warnings = Array.isArray(invoice.validation_warnings)
-    ? invoice.validation_warnings
-    : [];
+  const warnings = Array.isArray(invoice.validation_warnings) ? invoice.validation_warnings : [];
   if (warnings.length > 0 || invoice.status === "needs_review") {
     const notice = document.createElement("p");
     notice.className = "invoice-review";
     notice.textContent = warnings.length > 0
-      ? `Please verify this invoice against the source document: ${warnings.join(" ")}`
-      : "Some extracted amounts did not pass arithmetic checks. Verify the values against the source invoice before using them.";
+      ? `Please verify: ${warnings.join(" ")}`
+      : "Some extracted amounts did not pass arithmetic checks.";
     content.push(notice);
   }
   content.push(heading, table);
@@ -545,7 +498,6 @@ function showInvoice(invoice, fileId) {
   resultSection.scrollIntoView({ block: "start" });
 }
 
-// Polling functions
 function startPolling() {
   stopPolling();
   pollInterval = setInterval(async () => {
@@ -553,14 +505,8 @@ function startPolling() {
       try {
         const files = await api("/get_upload_data");
         renderFiles(files);
-
-        // Check if there is any actual work happening. If not, stop polling.
-        const hasPendingFiles = files.some(
-          (f) => f.status === "pending" || f.status === "processing"
-        );
-        if (!hasPendingFiles) {
-          stopPolling();
-        }
+        const hasPendingFiles = files.some((f) => f.status === "pending" || f.status === "processing");
+        if (!hasPendingFiles) stopPolling();
       } catch (e) {
         console.error("Auto-refresh failed:", e);
       }
@@ -576,27 +522,13 @@ function stopPolling() {
 }
 
 // Event Listeners
-document.querySelector("#single-upload-form").addEventListener("submit", (event) => {
-  runRequest(() => uploadFile(event));
-});
-document.querySelector("#batch-upload-form").addEventListener("submit", (event) => {
-  runRequest(() => uploadBatch(event));
-});
-document.querySelector("#parse-all").addEventListener("click", () => {
-  runRequest(parseAllFiles);
-});
-document.querySelector("#refresh-files").addEventListener("click", () => {
-  runRequest(loadFiles);
-});
-document.querySelector("#download-excel").addEventListener("click", () => {
-  runRequest(downloadInvoices);
-});
-loginForm.addEventListener("submit", (event) => {
-  runRequest(() => handleLogin(event));
-});
-registerForm.addEventListener("submit", (event) => {
-  runRequest(() => handleRegister(event));
-});
+document.querySelector("#single-upload-form").addEventListener("submit", (event) => runRequest(() => uploadFile(event)));
+document.querySelector("#batch-upload-form").addEventListener("submit", (event) => runRequest(() => uploadBatch(event)));
+document.querySelector("#parse-all").addEventListener("click", () => runRequest(parseAllFiles));
+document.querySelector("#refresh-files").addEventListener("click", () => runRequest(loadFiles));
+document.querySelector("#download-excel").addEventListener("click", () => runRequest(downloadInvoices));
+loginForm.addEventListener("submit", (event) => runRequest(() => handleLogin(event)));
+registerForm.addEventListener("submit", (event) => runRequest(() => handleRegister(event)));
 authToggle.addEventListener("click", () => {
   const showingLogin = !loginForm.classList.contains("hidden");
   if (showingLogin) {
@@ -617,12 +549,10 @@ function init() {
     authSection.classList.add("hidden");
     mainApp.classList.remove("hidden");
     showWorkspacePage("files");
-
     startPolling();
     runRequest(loadFiles);
     return;
   }
-
   showLoginForm();
   authSection.classList.remove("hidden");
   mainApp.classList.add("hidden");

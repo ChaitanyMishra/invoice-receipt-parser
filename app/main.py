@@ -4,9 +4,9 @@ from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 import json
 import os
-import re
 import uuid
 import logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -20,9 +20,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from sqlmodel import SQLModel
-from tomlkit import ws
 from crud_invoice import get_invoice_by_id
-from contextlib import asynccontextmanager
 from app.auth import (
     create_access_token,
     decode_access_token,
@@ -40,7 +38,6 @@ from crud_uploaded_file import (
     get_files_with_invoices,
     get_file_with_invoice,
     get_file_by_id,
-    update_file_status,
     update_extracted_text,
 )
 from crud_user import create_user, get_user_by_email
@@ -81,7 +78,6 @@ def invoice_count(text: str):
     if len(unique_match) > 1:
         return False
     return True
-
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
@@ -196,7 +192,7 @@ def extract_file(file_id: int , current_user:User=Depends(get_current_user)):
 
 
 @app.post("/files/{file_id}/parse")
-def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
+def parse_file(file_id: int ,  force_llm: bool = False, current_user:User=Depends(get_current_user)):
     file = get_file_by_id(file_id)
     if not file:
             raise HTTPException(status_code=404, detail="File or extracted text not found")
@@ -213,17 +209,20 @@ def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
     rate_limit_key = f"rate_limit:parse:{current_user.id}"
     current_count = redis_client.get(rate_limit_key)
 
-    if current_count and int(current_count) >= 50:
+    if current_count and int(current_count) >= PARSE_LIMIT:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Try again in a minute."
         )
     redis_client.incr(rate_limit_key)
     if not current_count:
-        redis_client.expire(rate_limit_key, 60)
+        redis_client.expire(rate_limit_key, PARSE_WINDOW_SECONDS)
 
-    logger.info(f"Parsing file {file_id} for user {current_user.id}")
-    parsed_dict = parse_invoice_text(file.extracted_text)
+    logger.info(f"Parsing file {file_id} for user {current_user.id} (Force LLM: {force_llm})")
+
+    # FIX: Actually pass force_llm down to the parser
+    parsed_dict = parse_invoice_text(file.extracted_text, use_llm=force_llm)
+
     if not parsed_dict:
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
 
@@ -313,4 +312,5 @@ def export_invoice(current_user:User=Depends(get_current_user)):
     buffer.seek(0)
 
     return StreamingResponse(buffer,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition": 'attachment; filename="invoices_export.xlsx"'})
+
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

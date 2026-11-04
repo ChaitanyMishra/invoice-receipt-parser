@@ -493,7 +493,7 @@ def parse_invoice_text(
     if fetch_optional:
         wanted += [f for f in OPTIONAL_FIELDS if parsed_text.get(f) is None]
 
-    need_llm = bool(wanted)
+    need_llm = bool(wanted) or use_llm 
 
     llm_used = False
     llm_result = {}
