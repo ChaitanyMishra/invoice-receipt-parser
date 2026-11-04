@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 import logging
+import re
 
 logging.basicConfig(
     level=logging.INFO,
