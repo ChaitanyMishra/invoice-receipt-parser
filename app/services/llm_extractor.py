@@ -1,242 +1,145 @@
 import json
 import os
+import time
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 load_dotenv()
 
-def _invoice_data_prompt(text: str, missing_data: list[str]) -> str:
-    field_list = ", ".join(missing_data) if missing_data else "no additional fields"
-    return f"""Extract invoice details from the invoice text below.
+GROQ_MODEL = "openai/gpt-oss-20b"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
-Return one JSON object with:
-- "fields": an object containing only these missing text fields: {field_list}
-- "line_items": an array of itemized invoice rows
-
-For each line item return description, quantity, unit_price, and amount.
-Use numeric values for amounts, and null when a value is not shown. Include
-only actual item rows; exclude tax, subtotal, total, round-off, headers, and
-amount-in-words text. Do not invent values. For seller details, use the seller,
-not the buyer or shipping address.
-
-Invoice text:
-{text}"""
+# We make the clients only once and reuse them.
+# (Making a new client for every call wastes time.)
+groq_client = None
+gemini_client = None
 
 
-def extract_invoice_data_groq(text: str, missing_data: list[str]) -> dict:
+def get_groq_client():
+    global groq_client
+    if groq_client is None:
+        # max_retries=0 means the library will NOT secretly retry.
+        # We handle the retry ourselves below so we can see what happens.
+        groq_client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=os.getenv("GROQ_API_KEY"),
+            timeout=15.0,
+            max_retries=0,
+        )
+    return groq_client
+
+
+def get_gemini_client():
+    global gemini_client
+    if gemini_client is None:
+        gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    return gemini_client
+
+
+# What each field means. We only send the ones we actually need.
+FIELD_HELP = {
+    "vendor_name": "name of the SELLER (the company that made the invoice), not the buyer",
+    "address": "address of the SELLER only, not the buyer or shipping address",
+    "invoice_number": "the invoice number, copied exactly as written on the invoice",
+    "date": "the invoice date in DD-MM-YYYY format",
+    "gstin": "GSTIN of the SELLER, 15 characters, copied exactly as written",
+    "order_number": "the order or reference number, only if it is shown",
+}
+
+
+def make_prompt(text, missing_fields):
+    lines = []
+    lines.append("Read the invoice text below and return ONE JSON object.")
+    lines.append("")
+    lines.append('The JSON must have two keys: "fields" and "line_items".')
+    lines.append("")
+
+    if missing_fields:
+        lines.append('"fields" must contain only these keys:')
+        for name in missing_fields:
+            lines.append("- " + name + ": " + FIELD_HELP.get(name, ""))
+    else:
+        lines.append('"fields" must be an empty object.')
+
+    lines.append("")
+    lines.append('"line_items" is a list of the rows in the item table.')
+    lines.append("Each row has: description, quantity, unit_price, amount.")
+    lines.append("- amount is the value of that row BEFORE tax")
+    lines.append("- use plain numbers (no currency symbols, no commas)")
+    lines.append("- use null if a value is not shown")
+    lines.append("- do NOT include: tax lines, subtotal, total, round-off,")
+    lines.append("  table headers, amount in words, signature or terms text")
+    lines.append("- if there are no item rows, return an empty list")
+    lines.append("")
+    lines.append("Do not guess. If a field is not found, use null.")
+    lines.append("")
+    lines.append("Invoice text:")
+    lines.append(text)
+
+    return "\n".join(lines)
+
+
+def call_groq(prompt):
+    client = get_groq_client()
+
+    # Try at most 2 times. Only retry when Groq says "too many requests".
+    for attempt in range(2):
+        try:
+            reply = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_completion_tokens=2000,
+                # "low" = the model thinks less, so it answers faster.
+                # Invoice reading is easy, it does not need deep thinking.
+                extra_body={"reasoning_effort": "low"},
+            )
+            return reply.choices[0].message.content
+        except RateLimitError:
+            if attempt == 1:
+                raise  # second time also failed, let the caller use Gemini
+            print("Groq rate limit hit, waiting 2 seconds and trying again...")
+            time.sleep(2)
+
+
+def extract_invoice_data_groq(text, missing_data):
     if not text:
         return {}
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY"),
-        timeout=15.0,
-    )
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[{"role": "user", "content": _invoice_data_prompt(text, missing_data)}],
-        response_format={"type": "json_object"},
-    )
-    content = response.choices[0].message.content
-    return json.loads(content) if content else {}
 
+    prompt = make_prompt(text, missing_data)
+    content = call_groq(prompt)
 
-def extract_invoice_data_gemini(text: str, missing_data: list[str]) -> dict:
-    if not text:
-        return {}
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=_invoice_data_prompt(text, missing_data),
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    return json.loads(response.text) if response.text else {}
-
-
-def extract_missing_data_gemini(text: str, missing_data: list) -> dict:
-    if not text:
-        return {}
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    field_list = ", ".join(missing_data)
-    prompt = f'''You are an invoice parser. Extract ONLY these fields: {field_list}
-
-    Important definitions (apply only to fields in the list above):
-    - vendor_name: the name of the SELLER (company that issued the invoice), NOT the buyer
-    - address: the SELLER's address only (the vendor's address, NOT the buyer's or shipping address)
-    - invoice_number: the invoice identifier (e.g., "1/Bihar/25-26", "POD-26-241475108")
-    - date: the invoice date (return as shown in the invoice)
-    - gstin: the seller's GST registration number (15 characters, e.g., "10AAYCS0991B1ZD")
-    - order_number: the order reference (e.g., "Bihar/PMF/0001")
-    - total: the GRAND TOTAL after taxes and round-offs. This is the LARGEST number
-    on the invoice. It MUST be greater than tax_amount.
-    - tax_amount: the TOTAL TAX (CGST + SGST + IGST combined). This MUST be LESS
-    than total. If your answer is greater than total, you made an arithmetic error.
-    - subtotal: the TAXABLE value (amount BEFORE tax). Often labeled "Taxable Value"
-    or "Sub Total".
-
-    Rules:
-    - Return numbers only for numeric fields. Strip currency symbols (₹, Rs, $) and commas.
-    - Return dates in YYYY-MM-DD format.
-    - If a field is not found, use null. Do NOT invent values.
-    - Do NOT include fields that are not in the list above.
-
-    Return a single JSON object with exactly these keys: {field_list}
-
-    Invoice text:
-    {text}'''
-
-    response = client.models.generate_content(
-        model="gemini-3.5-flash-lite",
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    return json.loads(response.text) if response.text else {}
-
-
-def extract_missing_data_groq(text: str, missing_data: list) -> dict:
-    if not text:
-        return {}
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_API_KEY")
-    )
-
-    field_list = ", ".join(missing_data)
-    prompt = f'''You are an invoice parser. Extract ONLY these fields: {field_list}
-
-    Important definitions (apply only to fields in the list above):
-    - vendor_name: the name of the SELLER (company that issued the invoice), NOT the buyer
-    - address: the SELLER's address only (the vendor's address, NOT the buyer's or shipping address)
-    - invoice_number: the invoice identifier (e.g., "1/Bihar/25-26", "POD-26-241475108")
-    - date: the invoice date (return as shown in the invoice)
-    - gstin: the seller's GST registration number (15 characters, e.g., "10AAYCS0991B1ZD")
-    - order_number: the order reference (e.g., "Bihar/PMF/0001")
-    - total: the GRAND TOTAL after taxes and round-offs. This is the LARGEST number
-    on the invoice. It MUST be greater than tax_amount.
-    - tax_amount: the TOTAL TAX (CGST + SGST + IGST combined). This MUST be LESS
-    than total. If your answer is greater than total, you made an arithmetic error.
-    - subtotal: the TAXABLE value (amount BEFORE tax). Often labeled "Taxable Value"
-    or "Sub Total".
-
-    Rules:
-    - Return numbers only for numeric fields. Strip currency symbols (₹, Rs, $) and commas.
-    - Return dates in YYYY-MM-DD format.
-    - If a field is not found, use null. Do NOT invent values.
-    - Do NOT include fields that are not in the list above.
-
-    Return a single JSON object with exactly these keys: {field_list}
-
-    Invoice text:
-    {text}'''
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-    )
-    return (
-        json.loads(response.choices[0].message.content)
-        if response.choices[0].message.content
-        else {}
-    )
-# LineItems Extraction
-
-def extract_line_items_gemini(text:str) -> list:
-    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
-    prompt = f'''You are an invoice parser. Extract all line items from this invoice text.
-
-    Return a JSON object with a single key "line_items" containing an array.
-
-    Each item in the array should have:
-    - description: the full item description (text from the "Particulars", "Description", or "Item" column)
-    - quantity: the quantity (number, or null if not shown)
-    - unit_price: the price per unit (number, no currency symbols, or null if not shown)
-    - amount: the TAXABLE value of the line item (the amount BEFORE tax, not the grand total)
-
-    Rules:
-    - Only include rows from the itemized table (the "Particulars", "Description", or "Item" column).
-    - Do NOT include:
-    - round-off lines
-    - subtotal or total lines
-    - tax lines (CGST, SGST, IGST, VAT)
-    - "Amount in Words" sections
-    - signature blocks ("Authorised Signatory", "For X Pvt Ltd")
-    - terms and conditions
-    - headers (Sl No, Description, Qty, Rate, Amount)
-    - Most invoices have 1-3 line items. If you return more than 5, you are including non-item text. Remove those.
-    - Return numbers only, never strings. Strip currency symbols (₹, Rs, $).
-    - Do NOT include trailing colons or extra punctuation in the description.
-
-    If no line items are found, return {{"line_items": []}}.
-
-    Example:
-    {{
-    "line_items": [
-        {{"description": "Portfolio Management Fee", "quantity": null, "unit_price": null, "amount": 3546894.00}},
-        {{"description": "Shipping Charges", "quantity": 1, "unit_price": 66.94, "amount": 66.94}}
-    ]
-    }}
-
-    Invoice text:
-    {text}'''
-    response = client.models.generate_content(
-        model='gemini-3.5-flash-lite',
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type='application/json')
-    )
-    content = response.text
     if not content:
-        return []
-    parsed = json.loads(content)
-    return parsed.get('line_items',[])
+        return {}
+    data = json.loads(content)
+    if not isinstance(data, dict):
+        return {}
+    return data
 
-def extract_line_items_groq(text:str) -> list:
+
+def extract_invoice_data_gemini(text, missing_data):
     if not text:
-        return []
-    client = OpenAI(base_url="https://api.groq.com/openai/v1",api_key=os.getenv('GROQ_API_KEY'))
-    prompt = f'''You are an invoice parser. Extract all line items from this invoice text.
+        return {}
 
-    Return a JSON object with a single key "line_items" containing an array.
+    prompt = make_prompt(text, missing_data)
+    client = get_gemini_client()
 
-    Each item in the array should have:
-    - description: the full item description (text from the "Particulars", "Description", or "Item" column)
-    - quantity: the quantity (number, or null if not shown)
-    - unit_price: the price per unit (number, no currency symbols, or null if not shown)
-    - amount: the TAXABLE value of the line item (the amount BEFORE tax, not the grand total)
-
-    Rules:
-    - Only include rows from the itemized table (the "Particulars", "Description", or "Item" column).
-    - Do NOT include:
-    - round-off lines
-    - subtotal or total lines
-    - tax lines (CGST, SGST, IGST, VAT)
-    - "Amount in Words" sections
-    - signature blocks ("Authorised Signatory", "For X Pvt Ltd")
-    - terms and conditions
-    - headers (Sl No, Description, Qty, Rate, Amount)
-    - Most invoices have 1-3 line items. If you return more than 5, you are including non-item text. Remove those.
-    - Return numbers only, never strings. Strip currency symbols (₹, Rs, $).
-    - Do NOT include trailing colons or extra punctuation in the description.
-
-    If no line items are found, return {{"line_items": []}}.
-
-    Example:
-    {{
-    "line_items": [
-        {{"description": "Portfolio Management Fee", "quantity": null, "unit_price": null, "amount": 3546894.00}},
-        {{"description": "Shipping Charges", "quantity": 1, "unit_price": 66.94, "amount": 66.94}}
-    ]
-    }}
-
-    Invoice text:
-    {text}'''
-    response = client.chat.completions.create(
-    model="openai/gpt-oss-20b",
-    messages=[{'role':'user','content':prompt}],
-    response_format={"type":'json_object'}
+    reply = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0,
+        ),
     )
-    raw = response.choices[0].message.content
-    if not raw:
-        return []
-    return json.loads(raw).get("line_items", [])
 
+    if not reply.text:
+        return {}
+    data = json.loads(reply.text)
+    if not isinstance(data, dict):
+        return {}
+    return data

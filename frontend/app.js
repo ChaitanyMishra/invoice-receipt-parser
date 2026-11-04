@@ -340,7 +340,7 @@ async function parseAllFiles() {
       file.status !== "completed" &&
       file.status !== "processing",
   );
-  const filesToParse = pendingFiles.slice(0, 3);
+  const filesToParse = pendingFiles.slice(0, 10);
   const failures = [];
   for (const [index, file] of filesToParse.entries()) {
     try {
