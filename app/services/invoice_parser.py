@@ -198,7 +198,6 @@ HEADER_ALIASES = {
     "unit_price": ("unit price", "rate", "price"),
     "amount": ("amount", "taxable value", "total", "value"),
 }
-# "GST Rate", "Tax Amount", "CGST %" are not the columns we want.
 TAX_HEADER = re.compile(r"\b(?:gst|cgst|sgst|igst|tax)\b|%", re.IGNORECASE)
 TOTAL_ROW = re.compile(r"\b(?:sub[\s-]?total|grand\s+total|total)\b", re.IGNORECASE)
 
@@ -395,9 +394,10 @@ FIELD_PATTERNS = {
         r"Bill No\.?\s*:?\s*(\S+)",
     ],
     "date": [
-        r"Invoice Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
+        r"(?:Invoice\s*)?Date\s*:?\s*(\d{2}[./-]\d{2}[./-]\d{4})",
         r"Dated\s*:?\s*(\d{2}-[A-Za-z]{3}-\d{2,4})",
         r"Date\s*:\s*(\d{2}[./-]\d{2}[./-]\d{4})",
+        r"(\d{2}-[A-Za-z]{3}-\d{2,4})",
     ],
     "gstin": [
         r"GST Registration No\s*:\s*(\S+)",
@@ -442,7 +442,10 @@ def parse_invoice_text(
 ) -> dict:
     if not text:
         return {}
+
     parsed_text = {}
+
+    # 1. Extract standard fields
     for field in FIELD_PATTERNS:
         if field == "total":
             value = extract_total(text)
@@ -456,14 +459,32 @@ def parse_invoice_text(
             value = None
         parsed_text[field] = value
 
-    vendor_name = re.search(r"(?m)^For\s+(.+?)\s*:\s*$", text)
-    parsed_text["vendor_name"] = vendor_name.group(1) if vendor_name else None
+    # 2. Extract Vendor Name (OUTSIDE the loop)
+    # Look for "Vendor Name Invoice No. Dated" or "Vendor Name Invoice No."
+    vendor_match = re.search(r"(?m)^(.+?)\s+Invoice No\.?\s*(?:Dated)?", text, re.IGNORECASE)
+
+    # Fallback 1: Look for "for Vendor Name"
+    if not vendor_match:
+        vendor_match = re.search(r"(?mi)^for\s+(.+?)(?:\s*:\s*)?$", text)
+
+    # Fallback 2: Grab the first line that doesn't contain standard header words
+    if not vendor_match:
+        lines = text.strip().splitlines()
+        for line in lines[:5]:
+            if not re.search(r"(?i)tax invoice|e-invoice|irn|ack no|ack date", line):
+                vendor_match = re.match(r"^(.+?)(?:\s+202\d|\s+Invoice)", line)
+                if vendor_match:
+                    break
+
+    parsed_text["vendor_name"] = vendor_match.group(1).strip() if vendor_match else None
     parsed_text["address"] = None
 
+    # 3. Line Items
     line_items = extract_line_items_from_tables(tables) if tables else []
     if not line_items_verified(line_items, parse_amount(parsed_text.get("subtotal"))):
         line_items = []
 
+    # 4. LLM Fallback
     wanted = [
         field
         for field in CRITICAL_FIELDS
@@ -471,7 +492,8 @@ def parse_invoice_text(
     ]
     if fetch_optional:
         wanted += [f for f in OPTIONAL_FIELDS if parsed_text.get(f) is None]
-    need_llm = bool(wanted) or not line_items
+
+    need_llm = bool(wanted)
 
     llm_used = False
     llm_result = {}
@@ -501,10 +523,11 @@ def parse_invoice_text(
                 str(value).upper() if field == "gstin" else str(value)
             )
 
-    if not line_items and use_llm:
+    if not line_items and use_llm and llm_used:
         line_items = _normalise_items(llm_result.get("line_items", []))
     parsed_text["line_items"] = line_items
 
+    # 5. Warnings
     extra = []
     for field in CRITICAL_FIELDS:
         if field not in MONEY_FIELDS and parsed_text.get(field) is None:
@@ -521,5 +544,5 @@ def parse_invoice_text(
     if not line_items:
         extra.append("No line items extracted.")
 
-    parsed_text["llm_used"] = llm_used  # lets your benchmark count regex-only wins
+    parsed_text["llm_used"] = llm_used
     return cross_validation(parsed_text, extra)

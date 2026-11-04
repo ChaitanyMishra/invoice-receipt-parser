@@ -12,8 +12,6 @@ load_dotenv()
 GROQ_MODEL = "openai/gpt-oss-20b"
 GEMINI_MODEL = "gemini-3.5-flash-lite"
 
-# We make the clients only once and reuse them.
-# (Making a new client for every call wastes time.)
 groq_client = None
 gemini_client = None
 
@@ -21,8 +19,6 @@ gemini_client = None
 def get_groq_client():
     global groq_client
     if groq_client is None:
-        # max_retries=0 means the library will NOT secretly retry.
-        # We handle the retry ourselves below so we can see what happens.
         groq_client = OpenAI(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
@@ -38,8 +34,6 @@ def get_gemini_client():
         gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     return gemini_client
 
-
-# What each field means. We only send the ones we actually need.
 FIELD_HELP = {
     "vendor_name": "name of the SELLER (the company that made the invoice), not the buyer",
     "address": "address of the SELLER only, not the buyer or shipping address",
@@ -84,8 +78,6 @@ def make_prompt(text, missing_fields):
 
 def call_groq(prompt):
     client = get_groq_client()
-
-    # Try at most 2 times. Only retry when Groq says "too many requests".
     for attempt in range(2):
         try:
             reply = client.chat.completions.create(
@@ -101,7 +93,7 @@ def call_groq(prompt):
             return reply.choices[0].message.content
         except RateLimitError:
             if attempt == 1:
-                raise  # second time also failed, let the caller use Gemini
+                raise  
             print("Groq rate limit hit, waiting 2 seconds and trying again...")
             time.sleep(2)
 
