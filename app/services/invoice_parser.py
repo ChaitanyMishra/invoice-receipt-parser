@@ -436,7 +436,7 @@ def _grounded(value, text) -> bool:
 
 def parse_invoice_text(
     text: str,
-    use_llm: bool = True,
+    force_llm: bool = False, 
     tables=None,
     fetch_optional: bool = False,
 ) -> dict:
@@ -459,8 +459,6 @@ def parse_invoice_text(
             value = None
         parsed_text[field] = value
 
-    # 2. Extract Vendor Name (OUTSIDE the loop)
-    # Look for "Vendor Name Invoice No. Dated" or "Vendor Name Invoice No."
     vendor_match = re.search(r"(?m)^(.+?)\s+Invoice No\.?\s*(?:Dated)?", text, re.IGNORECASE)
 
     # Fallback 1: Look for "for Vendor Name"
@@ -493,11 +491,12 @@ def parse_invoice_text(
     if fetch_optional:
         wanted += [f for f in OPTIONAL_FIELDS if parsed_text.get(f) is None]
 
-    need_llm = bool(wanted) or use_llm 
+    # THE FIX: Only use LLM if wanted is not empty OR force_llm is True
+    need_llm = bool(wanted) or force_llm
 
     llm_used = False
     llm_result = {}
-    if use_llm and need_llm:
+    if need_llm:
         llm_used = True
         try:
             llm_result = extract_invoice_data_groq(text, wanted)
@@ -523,7 +522,7 @@ def parse_invoice_text(
                 str(value).upper() if field == "gstin" else str(value)
             )
 
-    if not line_items and use_llm and llm_used:
+    if not line_items and need_llm:
         line_items = _normalise_items(llm_result.get("line_items", []))
     parsed_text["line_items"] = line_items
 
