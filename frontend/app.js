@@ -112,23 +112,23 @@ function showLoginForm() {
   authToggle.textContent = "Need an account? Register";
 }
 
-function setBusy(isBusy) {
-  document.querySelectorAll("button").forEach((button) => {
-    button.disabled = isBusy;
-  });
-  loadingMessage.hidden = !isBusy;
-}
-
-async function runRequest(operation) {
-  setBusy(true);
+// FIX: Only disable the specific button that was clicked, not the whole page.
+async function runRequest(operation, triggerButton = null) {
+  if (triggerButton) triggerButton.disabled = true;
   errorMessage.hidden = true;
+
+  // Only show the global loading bar for forms (login/upload), not row actions
+  const isGlobalAction = !triggerButton;
+  if (isGlobalAction) loadingMessage.hidden = false;
+
   try {
     await operation();
   } catch (error) {
     errorMessage.textContent = error.message;
     errorMessage.hidden = false;
   } finally {
-    setBusy(false);
+    if (triggerButton) triggerButton.disabled = false;
+    if (isGlobalAction) loadingMessage.hidden = true;
   }
 }
 
@@ -145,7 +145,8 @@ function actionButton(label, className, handler) {
   button.type = "button";
   button.textContent = label;
   if (className) button.className = className;
-  button.addEventListener("click", () => runRequest(handler));
+  // Pass the button itself to runRequest
+  button.addEventListener("click", () => runRequest(handler, button));
   return button;
 }
 
@@ -209,7 +210,6 @@ function renderFiles(files) {
 
     if (hasInvoice) {
       group.append(actionButton("View", "", () => viewFile(file.id)));
-      // NEW: Deep Parse Button for LLM
       group.append(actionButton("Deep Parse (LLM)", "secondary-button", () => deepParseFile(file.id)));
       group.append(actionButton("Re-parse", "secondary-button", () => parseFile(file.id)));
     }
@@ -322,7 +322,7 @@ async function uploadBatch(event) {
 }
 
 async function parseAllFiles() {
-  stopPolling(); // Stop polling to prevent network spam
+  stopPolling();
   const files = await api("/get_upload_data");
   if (!Array.isArray(files)) throw new Error("The file-list response was not an array.");
 
@@ -334,7 +334,6 @@ async function parseAllFiles() {
 
   for (const [index, file] of filesToParse.entries()) {
     try {
-      // Update UI text to show progress
       batchNotice.textContent = `Parsing file ${index + 1} of ${filesToParse.length}: ${file.filename}`;
 
       if (!file.has_extracted_text) {
@@ -342,8 +341,6 @@ async function parseAllFiles() {
         if (extraction.status === "no_text_extracted") throw new Error(extraction.note);
       }
       await api(`/files/${encodeURIComponent(file.id)}/parse`, { method: "POST" });
-
-      // NO 1-second delay! Just let it run.
     } catch (error) {
       failures.push(`File #${file.id}: ${error.message}`);
     }
@@ -358,9 +355,8 @@ async function parseAllFiles() {
   startPolling();
 }
 
-// NEW: Deep parse using the LLM
 async function deepParseFile(fileId) {
-  batchNotice.textContent = "Running Deep Parse (LLM) - this may take 15 seconds...";
+  batchNotice.textContent = `Running Deep Parse (LLM) for #${fileId}...`;
   const result = await api(`/files/${encodeURIComponent(fileId)}/parse?force_llm=true`, {
     method: "POST",
   });
@@ -524,9 +520,9 @@ function stopPolling() {
 // Event Listeners
 document.querySelector("#single-upload-form").addEventListener("submit", (event) => runRequest(() => uploadFile(event)));
 document.querySelector("#batch-upload-form").addEventListener("submit", (event) => runRequest(() => uploadBatch(event)));
-document.querySelector("#parse-all").addEventListener("click", () => runRequest(parseAllFiles));
-document.querySelector("#refresh-files").addEventListener("click", () => runRequest(loadFiles));
-document.querySelector("#download-excel").addEventListener("click", () => runRequest(downloadInvoices));
+document.querySelector("#parse-all").addEventListener("click", (event) => runRequest(parseAllFiles, event.target));
+document.querySelector("#refresh-files").addEventListener("click", (event) => runRequest(loadFiles, event.target));
+document.querySelector("#download-excel").addEventListener("click", (event) => runRequest(downloadInvoices, event.target));
 loginForm.addEventListener("submit", (event) => runRequest(() => handleLogin(event)));
 registerForm.addEventListener("submit", (event) => runRequest(() => handleRegister(event)));
 authToggle.addEventListener("click", () => {
