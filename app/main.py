@@ -222,7 +222,7 @@ def parse_file(file_id: int ,  force_llm: bool = False, current_user:User=Depend
     logger.info(f"Parsing file {file_id} for user {current_user.id} (Force LLM: {force_llm})")
 
     # FIX: Actually pass force_llm down to the parser
-    parsed_dict = parse_invoice_text(file.extracted_text, use_llm=force_llm)
+    parsed_dict = parse_invoice_text(file.extracted_text, force_llm=force_llm)
 
     if not parsed_dict:
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
