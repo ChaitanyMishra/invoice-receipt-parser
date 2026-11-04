@@ -54,7 +54,7 @@ class UserRegister(BaseModel):
 redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"), decode_responses=True)  # type: ignore
 
 UPLOAD_DIR = "uploads"
-PARSE_LIMIT = 3
+PARSE_LIMIT = 50
 PARSE_WINDOW_SECONDS = 60
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -210,21 +210,17 @@ def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
             status_code=400, detail="pdf contains more than 1 invoice"
         )
 
-    parse_count = redis_client.eval(
-        "local count = redis.call('INCR', KEYS[1]); "
-        "if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; "
-        "return count",
-        1,
-        "invoice_parse_limit",
-        PARSE_WINDOW_SECONDS,
-    )
-    if parse_count > PARSE_LIMIT:
-        retry_after = max(redis_client.ttl("invoice_parse_limit"), 1)
+    rate_limit_key = f"rate_limit:parse:{current_user.id}"
+    current_count = redis_client.get(rate_limit_key)
+
+    if current_count and int(current_count) >= 50:
         raise HTTPException(
             status_code=429,
-            detail=f"Parsing is limited to {PARSE_LIMIT} files per minute. Try again in {retry_after} seconds.",
-            headers={"Retry-After": str(retry_after)},
+            detail="Rate limit exceeded. Try again in a minute."
         )
+    redis_client.incr(rate_limit_key)
+    if not current_count:
+        redis_client.expire(rate_limit_key, 60)
 
     logger.info(f"Parsing file {file_id} for user {current_user.id}")
     parsed_dict = parse_invoice_text(file.extracted_text)
@@ -232,8 +228,6 @@ def parse_file(file_id: int , current_user:User=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
 
     invoice_id = create_invoice(parsed_dict, file_id)
-    file_status = "review" if parsed_dict.get("validation_warnings") else "completed"
-    update_file_status(file_id, file_status)
     redis_client.delete(f"my_files:user:{current_user.id}")
     return {
         "status": "parsed",

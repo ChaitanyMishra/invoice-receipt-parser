@@ -308,6 +308,7 @@ async function uploadFile(event) {
   input.value = "";
   await loadFiles();
   batchNotice.textContent = `Uploaded file #${result.id}: ${result.filename}`;
+  startPolling();
 }
 
 // Upload selected files using the backend's repeated `files` multipart field.
@@ -324,10 +325,11 @@ async function uploadBatch(event) {
   input.value = "";
   await loadFiles();
   batchNotice.textContent =
-    `Uploaded ${result.total_files} files. Click "Parse All Pending" to parse up to 3.`;
+    `Uploaded ${result.total_files} files. Click "Parse All Pending" to parse up to 50.`;
+  startPolling();
 }
 
-// Parse up to three unparsed files per click, one at a time.
+// Parse up to 50 unparsed files per click, one at a time.
 async function parseAllFiles() {
   const files = await api("/get_upload_data");
   if (!Array.isArray(files)) {
@@ -340,7 +342,7 @@ async function parseAllFiles() {
       file.status !== "completed" &&
       file.status !== "processing",
   );
-  const filesToParse = pendingFiles.slice(0, 10);
+  const filesToParse = pendingFiles.slice(0, 50);
   const failures = [];
   for (const [index, file] of filesToParse.entries()) {
     try {
@@ -370,7 +372,8 @@ async function parseAllFiles() {
     throw new Error(`Some files could not be parsed:\n${failures.join("\n")}`);
   }
   batchNotice.textContent =
-    `Parsed ${filesToParse.length} file(s). ${pendingFiles.length - filesToParse.length} remaining; the limit is 3 files per minute.`;
+    `Parsed ${filesToParse.length} file(s). ${pendingFiles.length - filesToParse.length} remaining.`;
+  startPolling();
 }
 
 // Extract text from a single uploaded file.
@@ -402,7 +405,7 @@ async function parseFile(fileId) {
     method: "POST",
   });
   showInvoice(result.parsed_data, fileId);
-  await loadFiles(); // Update the table status
+  await loadFiles();
 }
 
 // Fetch an already parsed invoice from the database (NO re-parsing).
@@ -420,20 +423,16 @@ async function deleteFile(fileId) {
   try {
     await api(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
   } catch (error) {
-    // If it's a 404, the file is already gone. We can ignore it.
     if (!error.message.includes("404")) {
       throw error;
     }
   }
-
-  // Force a reload of the table
   await loadFiles();
-
-  // Hide the parsed invoice card if it's the one we just deleted
   if (resultSection.dataset.fileId === String(fileId)) {
     resultSection.hidden = true;
   }
 }
+
 // Download the server-generated Excel workbook through the shared API helper.
 async function downloadInvoices() {
   const button = document.querySelector("#download-excel");
@@ -548,18 +547,25 @@ function showInvoice(invoice, fileId) {
 
 // Polling functions
 function startPolling() {
-  stopPolling(); // Clear any existing interval first
+  stopPolling();
   pollInterval = setInterval(async () => {
-    // Only poll silently if the app is visible and no request is currently loading
     if (!mainApp.classList.contains("hidden") && loadingMessage.hidden) {
       try {
         const files = await api("/get_upload_data");
         renderFiles(files);
+
+        // Check if there is any actual work happening. If not, stop polling.
+        const hasPendingFiles = files.some(
+          (f) => f.status === "pending" || f.status === "processing"
+        );
+        if (!hasPendingFiles) {
+          stopPolling();
+        }
       } catch (e) {
         console.error("Auto-refresh failed:", e);
       }
     }
-  }, 5000); // 5 seconds
+  }, 5000);
 }
 
 function stopPolling() {
@@ -612,7 +618,6 @@ function init() {
     mainApp.classList.remove("hidden");
     showWorkspacePage("files");
 
-    // Start auto-refresh immediately on page load if logged in
     startPolling();
     runRequest(loadFiles);
     return;
