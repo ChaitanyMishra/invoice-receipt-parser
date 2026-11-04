@@ -15,6 +15,7 @@ const filesPage = document.querySelector("#files-page");
 const invoicesPage = document.querySelector("#invoices-page");
 const filesTab = document.querySelector("#files-tab");
 const invoicesTab = document.querySelector("#invoices-tab");
+const parseAllButton = document.querySelector("#parse-all");
 
 let pollInterval;
 let filesById = new Map();
@@ -114,7 +115,17 @@ function showLoginForm() {
 
 // FIX: Only disable the specific button that was clicked, not the whole page.
 async function runRequest(operation, triggerButton = null) {
-  if (triggerButton) triggerButton.disabled = true;
+  const originalButtonText = triggerButton?.textContent;
+  if (triggerButton) {
+    triggerButton.disabled = true;
+    triggerButton.setAttribute("aria-busy", "true");
+    const spinner = document.createElement("span");
+    spinner.className = "spinner button-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = originalButtonText;
+    triggerButton.replaceChildren(spinner, label);
+  }
   errorMessage.hidden = true;
 
   // Only show the global loading bar for forms (login/upload), not row actions
@@ -127,9 +138,27 @@ async function runRequest(operation, triggerButton = null) {
     errorMessage.textContent = error.message;
     errorMessage.hidden = false;
   } finally {
-    if (triggerButton) triggerButton.disabled = false;
+    if (triggerButton) {
+      triggerButton.disabled = false;
+      triggerButton.removeAttribute("aria-busy");
+      triggerButton.textContent = originalButtonText;
+    }
     if (isGlobalAction) loadingMessage.hidden = true;
   }
+}
+
+function setBatchNotice(message, loading = false) {
+  batchNotice.replaceChildren();
+  if (loading) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    batchNotice.append(spinner);
+  }
+  const text = document.createElement("span");
+  text.textContent = message;
+  batchNotice.append(text);
+  batchNotice.classList.toggle("is-loading", loading);
 }
 
 function addCell(row, value, className = "") {
@@ -162,6 +191,7 @@ function renderFiles(files) {
 
   files.sort((left, right) => Number(left.id) - Number(right.id));
   filesById = new Map(files.map((file) => [String(file.id), file]));
+  updateOverview(files);
   renderInvoices(files);
   filesBody.replaceChildren();
 
@@ -218,6 +248,19 @@ function renderFiles(files) {
     actions.append(group);
     filesBody.append(row);
   });
+}
+
+function updateOverview(files) {
+  const parsedCount = files.filter(
+    (file) => file.invoice && typeof file.invoice === "object",
+  ).length;
+  const pendingCount = files.filter(
+    (file) => !file.invoice && file.status !== "completed" && file.status !== "processing",
+  ).length;
+
+  document.querySelector("#file-count").textContent = String(files.length);
+  document.querySelector("#pending-count").textContent = String(pendingCount);
+  document.querySelector("#invoice-count").textContent = String(parsedCount);
 }
 
 function renderInvoices(files) {
@@ -303,7 +346,7 @@ async function uploadFile(event) {
   const result = await api("/files", { method: "POST", body: formData });
   input.value = "";
   await loadFiles();
-  batchNotice.textContent = `Uploaded file #${result.id}: ${result.filename}`;
+  setBatchNotice(`Uploaded file #${result.id}: ${result.filename}`);
   startPolling();
 }
 
@@ -317,59 +360,74 @@ async function uploadBatch(event) {
   const result = await api("/batch-upload", { method: "POST", body: formData });
   input.value = "";
   await loadFiles();
-  batchNotice.textContent = `Uploaded ${result.total_files} files. Click "Parse All Pending".`;
+  setBatchNotice(`Uploaded ${result.total_files} files. Use Parse All Pending to extract their details.`);
   startPolling();
 }
 
 async function parseAllFiles() {
   stopPolling();
-  const files = await api("/get_upload_data");
-  if (!Array.isArray(files)) throw new Error("The file-list response was not an array.");
+  try {
+    const files = await api("/get_upload_data");
+    if (!Array.isArray(files)) throw new Error("The file-list response was not an array.");
 
-  const pendingFiles = files.filter(
-    (file) => !file.invoice && file.status !== "completed" && file.status !== "processing",
-  );
-  const filesToParse = pendingFiles.slice(0, 50);
-  const failures = [];
+    const pendingFiles = files.filter(
+      (file) => !file.invoice && file.status !== "completed" && file.status !== "processing",
+    );
+    const filesToParse = pendingFiles.slice(0, 50);
+    const failures = [];
+    let completedCount = 0;
 
-  for (const [index, file] of filesToParse.entries()) {
-    try {
-      batchNotice.textContent = `Parsing file ${index + 1} of ${filesToParse.length}: ${file.filename}`;
-
-      if (!file.has_extracted_text) {
-        const extraction = await api(`/files/${encodeURIComponent(file.id)}/extract`, { method: "POST" });
-        if (extraction.status === "no_text_extracted") throw new Error(extraction.note);
-      }
-      await api(`/files/${encodeURIComponent(file.id)}/parse`, { method: "POST" });
-    } catch (error) {
-      failures.push(`File #${file.id}: ${error.message}`);
+    if (filesToParse.length === 0) {
+      setBatchNotice("Everything is up to date. Upload a file or refresh the list.");
+      return;
     }
-  }
 
-  await loadFiles();
-  if (failures.length > 0) {
-    throw new Error(`Some files could not be parsed:\n${failures.join("\n")}`);
-  }
+    for (const [index, file] of filesToParse.entries()) {
+      try {
+        setBatchNotice(
+          `Parsing file ${index + 1} of ${filesToParse.length}: ${file.filename}`,
+          true,
+        );
 
-  batchNotice.textContent = `Successfully parsed ${filesToParse.length} file(s).`;
-  startPolling();
+        if (!file.has_extracted_text) {
+          const extraction = await api(`/files/${encodeURIComponent(file.id)}/extract`, { method: "POST" });
+          if (extraction.status === "no_text_extracted") throw new Error(extraction.note);
+        }
+        await api(`/files/${encodeURIComponent(file.id)}/parse`, { method: "POST" });
+        await loadFiles();
+        completedCount += 1;
+        setBatchNotice(`Parsed ${completedCount} of ${filesToParse.length} files.`);
+      } catch (error) {
+        failures.push(`File #${file.id}: ${error.message}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      setBatchNotice(`Parsed ${completedCount} of ${filesToParse.length}; ${failures.length} need attention.`);
+      throw new Error(`Some files could not be parsed:\n${failures.join("\n")}`);
+    }
+
+    setBatchNotice(`All done — parsed ${completedCount} file(s).`);
+  } finally {
+    startPolling();
+  }
 }
 
 async function deepParseFile(fileId) {
-  batchNotice.textContent = `Running Deep Parse (LLM) for #${fileId}...`;
+  setBatchNotice(`Running Deep Parse (LLM) for file #${fileId}…`, true);
   const result = await api(`/files/${encodeURIComponent(fileId)}/parse?force_llm=true`, {
     method: "POST",
   });
   showInvoice(result.parsed_data, fileId);
   await loadFiles();
-  batchNotice.textContent = `Deep Parse complete for file #${fileId}.`;
+  setBatchNotice(`Deep Parse complete for file #${fileId}.`);
 }
 
 async function extractFile(fileId) {
   const result = await api(`/files/${encodeURIComponent(fileId)}/extract`, { method: "POST" });
-  batchNotice.textContent = result.status === "no_text_extracted"
+  setBatchNotice(result.status === "no_text_extracted"
     ? result.note
-    : `Text extracted from file #${fileId}.`;
+    : `Text extracted from file #${fileId}.`);
   await loadFiles();
 }
 
@@ -520,7 +578,7 @@ function stopPolling() {
 // Event Listeners
 document.querySelector("#single-upload-form").addEventListener("submit", (event) => runRequest(() => uploadFile(event)));
 document.querySelector("#batch-upload-form").addEventListener("submit", (event) => runRequest(() => uploadBatch(event)));
-document.querySelector("#parse-all").addEventListener("click", (event) => runRequest(parseAllFiles, event.target));
+parseAllButton.addEventListener("click", () => runRequest(parseAllFiles, parseAllButton));
 document.querySelector("#refresh-files").addEventListener("click", (event) => runRequest(loadFiles, event.target));
 document.querySelector("#download-excel").addEventListener("click", (event) => runRequest(downloadInvoices, event.target));
 loginForm.addEventListener("submit", (event) => runRequest(() => handleLogin(event)));

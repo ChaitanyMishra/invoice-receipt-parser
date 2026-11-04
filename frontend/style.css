@@ -46,6 +46,13 @@ button:disabled {
   opacity: 0.6;
 }
 
+button:focus-visible,
+a:focus-visible,
+.table-wrap:focus-visible {
+  outline: 3px solid rgb(36 87 167 / 35%);
+  outline-offset: 2px;
+}
+
 .page {
   width: min(100% - 2rem, 1120px);
   margin: 0 auto;
@@ -129,6 +136,41 @@ h2 {
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 8px 26px rgb(26 49 79 / 4%);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.summary-card {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 1rem 1.15rem;
+  border: 1px solid #e0e7f0;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fff, #f8faff);
+}
+
+.summary-label {
+  color: #536780;
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.summary-card strong {
+  color: #18395f;
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.summary-detail {
+  color: #718096;
+  font-size: 0.78rem;
 }
 
 .auth-panel {
@@ -256,6 +298,7 @@ input[type="file"] {
 
 .table-wrap {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   border: 1px solid #e6ebf2;
   border-radius: 10px;
 }
@@ -264,6 +307,14 @@ table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+}
+
+.files-table {
+  min-width: 620px;
+}
+
+.invoices-table {
+  min-width: 780px;
 }
 
 th,
@@ -369,8 +420,48 @@ td.actions {
 }
 
 .loading-message {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   color: #2457a7;
   font-weight: 700;
+}
+
+.loading-message[hidden] {
+  display: none;
+}
+
+.batch-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 1.5rem;
+}
+
+.batch-notice:empty {
+  display: none;
+}
+
+.spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+.button-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .invoice-fields {
@@ -489,6 +580,26 @@ td.actions {
     grid-template-columns: 1fr;
   }
 
+  .summary-grid {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .summary-card {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 0.8rem 1rem;
+  }
+
+  .summary-card strong {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .summary-detail {
+    grid-column: 1;
+  }
+
   .panel,
   .auth-panel {
     padding: 1rem;
@@ -502,5 +613,33 @@ td.actions {
 
   .section-heading {
     align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .section-heading > :last-child {
+    max-width: 100%;
+  }
+
+  .upload-actions {
+    width: 100%;
+  }
+
+  .upload-actions button {
+    flex: 1 1 9rem;
+  }
+
+  .action-group button {
+    min-height: 2.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

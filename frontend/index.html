@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#10233f">
     <title>Invoice &amp; Receipt Parser</title>
-    <link rel="stylesheet" href="style.css?v=20261027-5">
-    <script src="app.js?v=20261027-5" defer></script>
+    <link rel="stylesheet" href="style.css?v=20261104-1">
+    <script src="app.js?v=20261104-1" defer></script>
   </head>
   <body>
     <main class="page">
@@ -25,7 +25,10 @@
       </header>
 
       <p id="error-message" class="error-message" role="alert" hidden></p>
-      <p id="loading-message" class="loading-message" aria-live="polite" hidden>Loading...</p>
+      <p id="loading-message" class="loading-message" role="status" aria-live="polite" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Loading your workspace…</span>
+      </p>
 
       <section id="auth-section" class="panel auth-panel" aria-labelledby="auth-heading">
         <p class="eyebrow">Welcome to Invoice Desk</p>
@@ -57,6 +60,24 @@
           <button id="logout-button" class="secondary-button" type="button">Log out</button>
         </nav>
 
+        <section class="summary-grid" aria-label="Invoice overview">
+          <article class="summary-card">
+            <span class="summary-label">Uploaded files</span>
+            <strong id="file-count">0</strong>
+            <span class="summary-detail">In your workspace</span>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Ready to parse</span>
+            <strong id="pending-count">0</strong>
+            <span class="summary-detail">Waiting for extraction</span>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">Parsed invoices</span>
+            <strong id="invoice-count">0</strong>
+            <span class="summary-detail">Available to review</span>
+          </article>
+        </section>
+
         <div id="files-page">
           <section class="panel" aria-labelledby="upload-heading">
             <div class="upload-heading">
@@ -79,10 +100,10 @@
                 <button type="submit">Upload batch</button>
                 <button id="parse-all" class="secondary-button" type="button">Parse All Pending</button>
               </div>
-              <span class="muted">Parses up to 3 pending files per minute.</span>
+              <span class="muted">Parses instantly using regex. Use "Deep Parse (LLM)" for detailed line items.</span>
             </form>
             </div>
-            <p id="batch-notice" class="muted" aria-live="polite"></p>
+            <p id="batch-notice" class="batch-notice muted" role="status" aria-live="polite" aria-atomic="true"></p>
           </section>
 
           <section class="panel" aria-labelledby="files-heading">
@@ -95,8 +116,8 @@
                 <button id="refresh-files" class="secondary-button" type="button">Refresh</button>
               </div>
             </div>
-            <div class="table-wrap">
-              <table>
+            <div class="table-wrap" tabindex="0" aria-label="Uploaded files table; scroll horizontally to see all columns">
+              <table class="files-table">
                 <thead>
                   <tr>
                     <th scope="col">ID</th>
@@ -122,8 +143,8 @@
             </div>
             <button id="download-excel" type="button">Download Excel</button>
           </div>
-          <div class="table-wrap">
-            <table>
+          <div class="table-wrap" tabindex="0" aria-label="Invoices table; scroll horizontally to see all columns">
+            <table class="invoices-table">
               <thead>
                 <tr>
                   <th scope="col">ID</th>

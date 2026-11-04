@@ -93,11 +93,34 @@ SGST 9%: ₹ 90.00
 Grand Total: ₹ 1,180.00
 """
 
-    parsed = parse_invoice_text(text)
+    parsed = parse_invoice_text(text, force_llm=True)
 
     assert parsed["subtotal"] == "1000.00"
     assert parsed["tax_amount"] == "180.00"
     assert parsed["total"] == "1180.00"
-    assert parsed["validation_warnings"] == []
+    assert parsed["validation_warnings"] == [
+        "Critical field missing: gstin.",
+        "Critical field missing: vendor_name.",
+        "No line items extracted.",
+    ]
     groq_mock.assert_called_once()
+    gemini_mock.assert_not_called()
+
+
+@patch(
+    "app.services.invoice_parser.extract_invoice_data_gemini",
+    return_value={"fields": {}, "line_items": []},
+)
+@patch(
+    "app.services.invoice_parser.extract_invoice_data_groq",
+    return_value={"fields": {}, "line_items": []},
+)
+def test_parser_does_not_call_llm_without_force_llm(groq_mock, gemini_mock):
+    parsed = parse_invoice_text(
+        "Grand Total: 118.00\nTax Amount: 18.00\nTaxable Value: 100.00",
+        fetch_optional=True,
+    )
+
+    assert parsed["total"] == "118.00"
+    groq_mock.assert_not_called()
     gemini_mock.assert_not_called()

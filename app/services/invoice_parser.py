@@ -491,8 +491,7 @@ def parse_invoice_text(
     if fetch_optional:
         wanted += [f for f in OPTIONAL_FIELDS if parsed_text.get(f) is None]
 
-    # THE FIX: Only use LLM if wanted is not empty OR force_llm is True
-    need_llm = bool(wanted) or force_llm
+    need_llm = force_llm
 
     llm_used = False
     llm_result = {}
