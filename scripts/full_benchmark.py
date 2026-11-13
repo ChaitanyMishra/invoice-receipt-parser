@@ -5,7 +5,7 @@ import time
 
 from app.services.pdf_extractor import extract_text_from_pdf
 from app.services.invoice_parser import parse_invoice_text, extract_tables_from_pdf
-
+FORCE_LLM = os.environ.get("FORCE_LLM") == "1"
 folder = "/home/chaitany/Desktop/sample-invoices/samples/*.pdf"
 files = glob.glob(folder)
 files.sort()
@@ -68,7 +68,7 @@ for file in files:
     # 3. parse
     t2 = time.time()
     if text:
-        parsed = parse_invoice_text(text, tables=tables)
+        parsed = parse_invoice_text(text, tables=tables, force_llm=FORCE_LLM)
     else:
         parsed = {}
     t_parse = time.time() - t2

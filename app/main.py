@@ -15,12 +15,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 import redis
+from celery.result import AsyncResult
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
-from sqlmodel import SQLModel
+from sqlmodel import Session, SQLModel, select
+from crud_batch import create_batch
 from crud_invoice import get_invoice_by_id
 from app.auth import (
     create_access_token,
@@ -28,8 +30,9 @@ from app.auth import (
     get_password_hash,
     verify_hash_password,
 )
+from app.celery_app import celery_app
 from app.database import engine
-from app.models import User
+from app.models import Batch, UploadedFile, User
 from app.services.invoice_parser import parse_invoice_text
 from app.services.pdf_extractor import extract_text_from_pdf
 from crud_invoice import create_invoice
@@ -49,20 +52,54 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str
 
-redis_client = redis.Redis.from_url(os.getenv("REDIS_URL"), decode_responses=True)  # type: ignore
+redis_client = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+    socket_connect_timeout=1,
+    socket_timeout=1,
+)
 
 UPLOAD_DIR = "uploads"
 PARSE_LIMIT = 50
 PARSE_WINDOW_SECONDS = 60
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def safe_redis_delete(key: str):
+    if not redis_client:
+        return False
+    try:
+        return bool(redis_client.delete(key))
+    except redis.exceptions.RedisError:
+        return False
+
+
+def safe_redis_get(key: str):
+    if not redis_client:
+        return None
+    try:
+        return redis_client.get(key)
+    except redis.exceptions.RedisError:
+        return None
+
+
+def safe_redis_set(key: str, value: str, ex: int | None = None):
+    if not redis_client:
+        return False
+    try:
+        if ex is not None:
+            return redis_client.set(key, value, ex=ex)
+        return redis_client.set(key, value)
+    except redis.exceptions.RedisError:
+        return False
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     SQLModel.metadata.create_all(bind=engine)
     yield
+
+app = FastAPI(lifespan=lifespan)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 
 def invoice_count(text: str):
@@ -122,20 +159,29 @@ async def upload_file(
         user_id=current_user.id
     )
     logger.info(f"User {current_user.id} uploaded {filename}")
-    redis_client.delete(f"my_files:user:{current_user.id}")
+    safe_redis_delete(f"my_files:user:{current_user.id}")
     return {"id": record.id, "filename": filename, "size": len(read_file)}
 
 
 @app.get("/get_upload_data")
 def get_documents(current_user: User = Depends(get_current_user)):
     cache_key = f"my_files:user:{current_user.id}"
-    redis_cache = redis_client.get(cache_key)
+    redis_cache = None
+    if redis_client:
+        try:
+            redis_cache = redis_client.get(cache_key)
+        except redis.exceptions.RedisError:
+            redis_cache = None
     if redis_cache:
         logger.info("CACHE HIT")
         return json.loads(redis_cache)
     logger.info("CACHE MISS")
     file_list = get_files_with_invoices(current_user.id)
-    redis_client.set(cache_key, json.dumps(file_list, default=str), ex=60)
+    if redis_client:
+        try:
+            redis_client.set(cache_key, json.dumps(file_list, default=str), ex=60)
+        except redis.exceptions.RedisError:
+            pass
 
     return file_list
 
@@ -160,7 +206,7 @@ def del_file(file_id: int, current_user:User=Depends(get_current_user)):
     res = delete_file(file_id)
     if not res:
         raise HTTPException(status_code=404, detail="file not found")
-    redis_client.delete(f"my_files:user:{current_user.id}")
+    safe_redis_delete(f"my_files:user:{current_user.id}")
 
     return res
 
@@ -182,7 +228,7 @@ def extract_file(file_id: int , current_user:User=Depends(get_current_user)):
             "note": "File has no extractable text. Likely scanned PDF or image.",
         }
     update_extracted_text(file_id, extracted_text)
-    redis_client.delete(f"my_files:user:{current_user.id}")
+    safe_redis_delete(f"my_files:user:{current_user.id}")
 
     return {
         "status": "extracted",
@@ -208,16 +254,25 @@ def parse_file(file_id: int ,  force_llm: bool = False, current_user:User=Depend
         )
 
     rate_limit_key = f"rate_limit:parse:{current_user.id}"
-    current_count = redis_client.get(rate_limit_key)
+    current_count = None
+    if redis_client:
+        try:
+            current_count = redis_client.get(rate_limit_key)
+        except redis.exceptions.RedisError:
+            current_count = None
 
     if current_count and int(current_count) >= PARSE_LIMIT:
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Try again in a minute."
         )
-    redis_client.incr(rate_limit_key)
-    if not current_count:
-        redis_client.expire(rate_limit_key, PARSE_WINDOW_SECONDS)
+    if redis_client:
+        try:
+            redis_client.incr(rate_limit_key)
+            if not current_count:
+                redis_client.expire(rate_limit_key, PARSE_WINDOW_SECONDS)
+        except redis.exceptions.RedisError:
+            pass
 
     logger.info(f"Parsing file {file_id} for user {current_user.id} (Force LLM: {force_llm})")
 
@@ -228,7 +283,7 @@ def parse_file(file_id: int ,  force_llm: bool = False, current_user:User=Depend
         raise HTTPException(status_code=400, detail="Failed to parse invoice data")
 
     invoice_id = create_invoice(parsed_dict, file_id)
-    redis_client.delete(f"my_files:user:{current_user.id}")
+    safe_redis_delete(f"my_files:user:{current_user.id}")
     return {
         "status": "parsed",
         "invoice_id": invoice_id,
@@ -244,6 +299,10 @@ async def batch_upload(
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 
+    batch_id = create_batch(len(files))
+    created_files = []
+    task_ids = []
+
     for file in files:
         filename = file.filename or "unnamed_file"
         filepath = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}_{filename}")
@@ -252,15 +311,91 @@ async def batch_upload(
         with open(filepath, "wb") as f:
             f.write(read_file)
 
-        create_uploaded_file(
+        record = create_uploaded_file(
             filename=filename,
             size=len(read_file),
             filepath=filepath,
+            batch_id=batch_id,
             user_id=current_user.id
         )
-        redis_client.delete(f"my_files:user:{current_user.id}")
+        created_files.append(record.id)
 
-    return {"total_files": len(files), "status": "uploaded"}
+        task = celery_app.send_task("app.tasks.process_file", args=[record.id])
+        safe_redis_set(f"task_owner:{task.id}", str(current_user.id))
+        task_ids.append(task.id)
+        safe_redis_delete(f"my_files:user:{current_user.id}")
+
+    with Session(engine) as session:
+        batch = session.get(Batch, batch_id)
+        if batch:
+            batch.status = "processing"
+            session.commit()
+
+    return {
+        "total_files": len(files),
+        "batch_id": batch_id,
+        "status": "processing",
+        "file_ids": created_files,
+        "task_ids": task_ids,
+    }
+
+
+@app.get("/batch/{batch_id}")
+def get_batch(batch_id: int, current_user: User = Depends(get_current_user)):
+    with Session(engine) as session:
+        batch = session.get(Batch, batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="batch not found")
+
+        files = session.exec(
+            select(UploadedFile).where(UploadedFile.batch_id == batch_id)
+        ).all()
+        owned_files = [file for file in files if file.user_id == current_user.id]
+        if not owned_files and batch.id is not None:
+            raise HTTPException(status_code=403, detail="Not Authorized")
+
+        return {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "total_files": batch.total_files,
+            "completed_files": batch.completed_files,
+            "failed_files": batch.failed_files,
+            "files": [file.id for file in owned_files],
+        }
+
+
+@app.post("/files/{file_id}/queue")
+def queue_file_processing(file_id: int, current_user: User = Depends(get_current_user)):
+    file = get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="file not found")
+    if file.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not Authorized")
+
+    task = celery_app.send_task("app.tasks.process_file", args=[file_id])
+    safe_redis_set(f"task_owner:{task.id}", str(current_user.id))
+    return {
+        "task_id": task.id,
+        "file_id": file_id,
+        "status": "queued",
+    }
+
+
+@app.get("/tasks/{task_id}")
+def get_task_status(task_id: str, current_user: User = Depends(get_current_user)):
+    owner_id = safe_redis_get(f"task_owner:{task_id}")
+    if owner_id is not None and int(owner_id) != current_user.id:
+        raise HTTPException(status_code=403, detail="Not Authorized")
+
+    result = AsyncResult(task_id, app=celery_app)
+    response = {
+        "task_id": task_id,
+        "status": result.status,
+        "result": result.result,
+    }
+    if result.status in {"SUCCESS", "FAILURE"}:
+        safe_redis_delete(f"task_owner:{task_id}")
+    return response
 
 
 @app.post("/register", status_code=201)
@@ -287,6 +422,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     access_token = create_access_token({"email": existing_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
+
+SQLModel.metadata.create_all(bind=engine)
 
 @app.get('/invoices/export')
 def export_invoice(current_user:User=Depends(get_current_user)):

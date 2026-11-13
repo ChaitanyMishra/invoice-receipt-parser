@@ -22,6 +22,20 @@ __pycache__/
 Notes.md
 progress.md
 
+# Personal learning and interview-prep documents
+AI_ASSISTANCE_AND_OWNERSHIP.md
+COMPLETE_CODEBASE_TUTORIAL.md
+LIVE_CODING_EXERCISES.md
+LIVE_CODING_SOLUTIONS.md
+MOCK_INTERVIEW_GUIDE.md
+PERSONAL_LEARNING_ROADMAP.md
+PROJECT_INTERVIEW_QUESTIONS.md
+PYTHON_BACKEND_CONCEPTS.md
+RESUME_READY_PROJECT_DESCRIPTION.md
+VERIFIED_RESUME_METRICS.md
+VEIFIED_RESUME_METRICS.md
+VERIFICATION_REPORT.md
+
 # Learning scratchpad
 test_skills/
 
@@ -45,3 +59,5 @@ test_data/
 
 # Old location
 sample-invoices/
+
+llm_run.txt

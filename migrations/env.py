@@ -14,6 +14,20 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
+
+def get_db_url_for_migrations():
+    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING") == "1":
+        return "sqlite:///./test_invoice_parser.db"
+    if "pytest" in " ".join(sys.argv).lower():
+        return "sqlite:///./test_invoice_parser.db"
+    db_url = os.getenv("DB_URL")
+    if db_url:
+        return db_url
+    return "sqlite:///./test_invoice_parser.db"
+
+
+config.set_main_option("sqlalchemy.url", get_db_url_for_migrations())
+
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
