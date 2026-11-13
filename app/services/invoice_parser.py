@@ -1,3 +1,4 @@
+import os
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -12,7 +13,9 @@ CRITICAL_FIELDS = ("invoice_number", "date", "total", "gstin", "vendor_name")
 
 OPTIONAL_FIELDS = ("order_number", "address")
 
-STRICT_GSTIN_CHECKSUM = False
+STRICT_GSTIN_CHECKSUM = os.getenv("STRICT_GSTIN_CHECKSUM", "false").lower() in {"1", "true", "yes", "on"}
+DEEP_PARSE_ENABLED = os.getenv("DEEP_PARSE_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+DEEP_PARSE_MISSING_FIELDS_THRESHOLD = int(os.getenv("DEEP_PARSE_MISSING_FIELDS_THRESHOLD", "3"))
 
 AMOUNT_TOKEN = re.compile(
     r"(?<![A-Za-z0-9_/,])(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d{1,2})?(?!\d)"
@@ -434,6 +437,22 @@ def _grounded(value, text) -> bool:
     squeeze = lambda s: re.sub(r"\s+", "", str(s)).upper()
     return squeeze(value) in squeeze(text)
 
+
+def should_run_deep_parse(parsed_text: dict, force_llm: bool = False) -> bool:
+    if force_llm:
+        return True
+
+    if not DEEP_PARSE_ENABLED:
+        return False
+
+    missing_fields = [
+        field
+        for field in CRITICAL_FIELDS
+        if field not in MONEY_FIELDS and parsed_text.get(field) is None
+    ]
+    return len(missing_fields) >= DEEP_PARSE_MISSING_FIELDS_THRESHOLD
+
+
 def parse_invoice_text(
     text: str,
     force_llm: bool = False, 
@@ -491,20 +510,24 @@ def parse_invoice_text(
     if fetch_optional:
         wanted += [f for f in OPTIONAL_FIELDS if parsed_text.get(f) is None]
 
-    need_llm = force_llm
+    need_llm = force_llm or should_run_deep_parse(parsed_text, force_llm=force_llm)
 
     llm_used = False
     llm_result = {}
+    llm_reasons = []
     if need_llm:
         llm_used = True
+        llm_reasons.append("Deep parse triggered by missing critical fields or explicit force_llm flag.")
         try:
             llm_result = extract_invoice_data_groq(text, wanted)
         except Exception as e:
+            llm_reasons.append(f"Groq failed: {e}")
             print(f"Groq failed: {e}")
         if not llm_result:
             try:
                 llm_result = extract_invoice_data_gemini(text, wanted)
             except Exception as e:
+                llm_reasons.append(f"Gemini failed: {e}")
                 print(f"Gemini failed: {e}")
 
     llm_fields = llm_result.get("fields", llm_result)
@@ -543,4 +566,5 @@ def parse_invoice_text(
         extra.append("No line items extracted.")
 
     parsed_text["llm_used"] = llm_used
+    parsed_text["llm_reasons"] = llm_reasons
     return cross_validation(parsed_text, extra)

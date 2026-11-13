@@ -234,6 +234,13 @@ SECRET_KEY=your_super_secret_jwt_key
 | `GROQ_API_KEY` | Primary LLM provider key |
 | `GEMINI_API_KEY` | Fallback LLM provider key |
 | `SECRET_KEY` | Secret used to sign JWT tokens |
+| `STRICT_GSTIN_CHECKSUM` | Set to `true` to enforce GSTIN checksum verification during validation |
+| `DEEP_PARSE_ENABLED` | Set to `true` to allow the explicit deep-parse policy when many required fields are missing |
+| `DEEP_PARSE_MISSING_FIELDS_THRESHOLD` | Minimum missing critical fields before a deep parse is attempted; default is `3` |
+
+### Deep-parse fallback policy
+
+The default parsing flow remains regex-first and deterministic. A deep parse is only attempted when `force_llm=true` is passed explicitly or when the environment enables `DEEP_PARSE_ENABLED` and the number of missing critical fields reaches the configured threshold. This keeps the default path cheap and stable while still supporting an opt-in fallback for incomplete invoices.
 
 ---
 
